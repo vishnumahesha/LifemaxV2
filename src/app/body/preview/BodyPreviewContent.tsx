@@ -543,19 +543,38 @@ export default function BodyPreviewContent() {
                   </div>
                   <div className="text-center">
                     <div className="text-sm text-cyan-400 mb-2">Best Version</div>
-                    <div className="aspect-[3/4] rounded-xl overflow-hidden border border-cyan-500/30 bg-zinc-800">
-                      {result.images[0]?.url ? (
-                        <img
-                          src={result.images[0].url}
-                          alt="Best Version"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
+                    <div className="aspect-[3/4] rounded-xl overflow-hidden border border-cyan-500/30 bg-zinc-800 relative">
+                      {/* Show original with enhancement overlay */}
+                      {photoPreview && (
+                        <>
+                          <img
+                            src={photoPreview}
+                            alt="Best Version Preview"
+                            className="w-full h-full object-cover"
+                            style={{ filter: 'brightness(1.05) contrast(1.05)' }}
+                          />
+                          {/* Enhancement indicator overlay */}
+                          <div className="absolute inset-0 bg-gradient-to-t from-cyan-500/20 via-transparent to-teal-500/10 pointer-events-none" />
+                          <div className="absolute bottom-2 left-2 right-2">
+                            <div className="flex flex-wrap gap-1 justify-center">
+                              {result.appliedChanges.slice(0, 3).map((change, i) => (
+                                <span key={i} className="px-2 py-0.5 bg-black/60 backdrop-blur-sm rounded text-[10px] text-cyan-300">
+                                  {change.split(':')[0]}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      {!photoPreview && (
                         <div className="w-full h-full flex items-center justify-center text-zinc-500">
                           <ImagePlus className="w-12 h-12" />
                         </div>
                       )}
                     </div>
+                    <p className="text-xs text-zinc-500 mt-2">
+                      ✨ Visualization of improvements
+                    </p>
                   </div>
                 </div>
 

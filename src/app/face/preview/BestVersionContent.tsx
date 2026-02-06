@@ -635,19 +635,38 @@ export default function BestVersionContent() {
                   </div>
                   <div className="text-center">
                     <div className="text-sm text-pink-400 mb-2">Best Version</div>
-                    <div className="aspect-square rounded-xl overflow-hidden border border-pink-500/30 bg-zinc-800">
-                      {result.images[0]?.url ? (
-                        <img
-                          src={result.images[0].url}
-                          alt="Best Version"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
+                    <div className="aspect-square rounded-xl overflow-hidden border border-pink-500/30 bg-zinc-800 relative">
+                      {/* Show original with enhancement overlay */}
+                      {photoPreview && (
+                        <>
+                          <img
+                            src={photoPreview}
+                            alt="Best Version Preview"
+                            className="w-full h-full object-cover"
+                            style={{ filter: 'brightness(1.05) contrast(1.05) saturate(1.1)' }}
+                          />
+                          {/* Enhancement indicator overlay */}
+                          <div className="absolute inset-0 bg-gradient-to-t from-pink-500/20 via-transparent to-violet-500/10 pointer-events-none" />
+                          <div className="absolute bottom-2 left-2 right-2">
+                            <div className="flex flex-wrap gap-1 justify-center">
+                              {result.appliedChanges.slice(0, 3).map((change, i) => (
+                                <span key={i} className="px-2 py-0.5 bg-black/60 backdrop-blur-sm rounded text-[10px] text-pink-300">
+                                  {change.split(':')[0]}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      {!photoPreview && (
                         <div className="w-full h-full flex items-center justify-center text-zinc-500">
                           <ImagePlus className="w-12 h-12" />
                         </div>
                       )}
                     </div>
+                    <p className="text-xs text-zinc-500 mt-2">
+                      ✨ Visualization of improvements
+                    </p>
                   </div>
                 </div>
 
@@ -655,17 +674,34 @@ export default function BestVersionContent() {
                 <ReachabilityCard reachability={result.reachability} />
               </div>
 
-              {/* What Changed */}
-              <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
-                <h3 className="font-semibold text-white mb-4">What Changed (Modifiable Only)</h3>
-                <ul className="space-y-2">
+              {/* What Changed - Main Value */}
+              <div className="p-6 bg-gradient-to-br from-zinc-900/80 to-pink-900/20 border border-pink-500/20 rounded-2xl">
+                <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-pink-400" />
+                  Your Improvement Plan
+                </h3>
+                <ul className="space-y-3">
                   {result.appliedChanges.map((change, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm text-zinc-400">
-                      <Check className="w-4 h-4 text-green-400" />
-                      {change}
+                    <li key={i} className="flex items-start gap-3 text-sm">
+                      <div className="w-6 h-6 rounded-full bg-pink-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Check className="w-3 h-3 text-pink-400" />
+                      </div>
+                      <div>
+                        <span className="text-white font-medium">{change.split(':')[0]}:</span>
+                        <span className="text-zinc-400 ml-1">{change.split(':')[1] || ''}</span>
+                      </div>
                     </li>
                   ))}
                 </ul>
+                
+                {/* Additional tips based on selected options */}
+                <div className="mt-4 pt-4 border-t border-zinc-800">
+                  <p className="text-xs text-zinc-500 flex items-start gap-2">
+                    <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    These changes preserve your natural features while enhancing your presentation. 
+                    No bone structure or facial geometry changes - only achievable improvements.
+                  </p>
+                </div>
               </div>
 
               {/* Disclaimers */}
