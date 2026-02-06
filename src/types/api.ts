@@ -23,6 +23,7 @@ export function error(code: string, message: string, details?: Record<string, un
 export const ErrorCodes = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   PHOTO_QUALITY_TOO_LOW: 'PHOTO_QUALITY_TOO_LOW',
+  LOW_QUALITY: 'LOW_QUALITY',
   UPLOAD_FAILED: 'UPLOAD_FAILED',
   ANALYSIS_FAILED: 'ANALYSIS_FAILED',
   GENERATION_FAILED: 'GENERATION_FAILED',
@@ -30,6 +31,7 @@ export const ErrorCodes = {
   NOT_FOUND: 'NOT_FOUND',
   RATE_LIMITED: 'RATE_LIMITED',
   SERVER_ERROR: 'SERVER_ERROR',
+  DATABASE_ERROR: 'DATABASE_ERROR',
   // View validation codes
   INVALID_VIEW: 'INVALID_VIEW',
   POSE_INVALID: 'POSE_INVALID',
