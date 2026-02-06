@@ -525,110 +525,134 @@ export default function BodyPreviewContent() {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-6"
             >
-              {/* Before/After */}
-              <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
-                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                  <Dumbbell className="w-5 h-5 text-cyan-400" />
-                  Your Best Physique Preview
-                </h2>
-
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div className="text-center">
-                    <div className="text-sm text-zinc-500 mb-2">Current</div>
-                    <div className="aspect-[3/4] rounded-xl overflow-hidden border border-zinc-700">
-                      {photoPreview && (
-                        <img src={photoPreview} alt="Current" className="w-full h-full object-cover" />
-                      )}
-                    </div>
+              {/* Main Results Card */}
+              <div className="p-6 bg-gradient-to-br from-zinc-900 to-cyan-950/30 border border-cyan-500/20 rounded-2xl">
+                <div className="flex items-center gap-4 mb-6">
+                  {/* Your Photo */}
+                  <div className="w-20 h-28 rounded-xl overflow-hidden border-2 border-cyan-500/30 flex-shrink-0">
+                    {photoPreview && (
+                      <img src={photoPreview} alt="You" className="w-full h-full object-cover" />
+                    )}
                   </div>
-                  <div className="text-center">
-                    <div className="text-sm text-cyan-400 mb-2">Best Version</div>
-                    <div className="aspect-[3/4] rounded-xl overflow-hidden border border-cyan-500/30 bg-zinc-800 relative">
-                      {/* Show original with enhancement overlay */}
-                      {photoPreview && (
-                        <>
-                          <img
-                            src={photoPreview}
-                            alt="Best Version Preview"
-                            className="w-full h-full object-cover"
-                            style={{ filter: 'brightness(1.05) contrast(1.05)' }}
-                          />
-                          {/* Enhancement indicator overlay */}
-                          <div className="absolute inset-0 bg-gradient-to-t from-cyan-500/20 via-transparent to-teal-500/10 pointer-events-none" />
-                          <div className="absolute bottom-2 left-2 right-2">
-                            <div className="flex flex-wrap gap-1 justify-center">
-                              {result.appliedChanges.slice(0, 3).map((change, i) => (
-                                <span key={i} className="px-2 py-0.5 bg-black/60 backdrop-blur-sm rounded text-[10px] text-cyan-300">
-                                  {change.split(':')[0]}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                      {!photoPreview && (
-                        <div className="w-full h-full flex items-center justify-center text-zinc-500">
-                          <ImagePlus className="w-12 h-12" />
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-xs text-zinc-500 mt-2">
-                      ✨ Visualization of improvements
-                    </p>
+                  <div>
+                    <h2 className="text-xl font-bold text-white mb-1">Your Transformation Roadmap</h2>
+                    <p className="text-zinc-400 text-sm">Realistic goals based on your selections</p>
                   </div>
                 </div>
 
-                <ReachabilityCard reachability={result.reachability} />
-              </div>
+                {/* Time Estimate - Prominent */}
+                <div className="p-4 bg-black/30 rounded-xl mb-6 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                      <Timer className="w-6 h-6 text-cyan-400" />
+                    </div>
+                    <div>
+                      <div className="text-2xl font-bold text-cyan-400">
+                        {result.reachability.estimatedWeeks.min === result.reachability.estimatedWeeks.max
+                          ? `~${result.reachability.estimatedWeeks.min} weeks`
+                          : `${result.reachability.estimatedWeeks.min}-${result.reachability.estimatedWeeks.max} weeks`}
+                      </div>
+                      <div className="text-sm text-zinc-500">to reach this physique</div>
+                    </div>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-sm ${
+                    result.reachability.confidence >= 0.7 
+                      ? 'bg-green-500/20 text-green-400' 
+                      : result.reachability.confidence >= 0.5 
+                        ? 'bg-yellow-500/20 text-yellow-400' 
+                        : 'bg-orange-500/20 text-orange-400'
+                  }`}>
+                    {result.reachability.confidence >= 0.7 ? 'High' : result.reachability.confidence >= 0.5 ? 'Medium' : 'Low'} confidence
+                  </div>
+                </div>
 
-              {/* What Changed */}
-              <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
-                <h3 className="font-semibold text-white mb-4">What Changed</h3>
-                <ul className="space-y-2">
-                  {result.appliedChanges.map((change, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm text-zinc-400">
-                      <Check className="w-4 h-4 text-green-400" />
-                      {change}
-                    </li>
-                  ))}
-                </ul>
+                {/* Action Items */}
+                <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+                  <Dumbbell className="w-5 h-5 text-cyan-400" />
+                  Your Action Plan
+                </h3>
+                <div className="grid gap-3">
+                  {result.appliedChanges.map((change, i) => {
+                    const [title, description] = change.split(':');
+                    const icons: Record<string, React.ReactNode> = {
+                      'Body': <span className="text-lg">💪</span>,
+                      'Posture': <span className="text-lg">🧘</span>,
+                      'Outfit': <span className="text-lg">👔</span>,
+                      'Lighting': <span className="text-lg">💡</span>,
+                      'Leanness': <span className="text-lg">🔥</span>,
+                      'Muscle': <span className="text-lg">💪</span>,
+                    };
+                    return (
+                      <motion.div
+                        key={i}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.1 }}
+                        className="p-4 bg-zinc-800/50 rounded-xl flex items-start gap-4 hover:bg-zinc-800/70 transition-colors"
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                          {icons[title] || <Check className="w-5 h-5 text-cyan-400" />}
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-medium text-white">{title}</div>
+                          <div className="text-sm text-zinc-400">{description || 'Recommended improvement'}</div>
+                        </div>
+                        <div className="text-xs text-cyan-400 bg-cyan-500/10 px-2 py-1 rounded">
+                          {i === 0 ? 'Priority' : `Step ${i + 1}`}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+
+                {/* Assumptions */}
+                {result.reachability.assumptions.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-zinc-800">
+                    <p className="text-xs text-zinc-500 mb-2">Assumes:</p>
+                    <ul className="space-y-1">
+                      {result.reachability.assumptions.map((assumption, i) => (
+                        <li key={i} className="text-xs text-zinc-500 flex items-center gap-2">
+                          <span className="w-1 h-1 rounded-full bg-zinc-600" />
+                          {assumption}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {/* Silhouette Tips */}
               {result.silhouetteTips.length > 0 && (
                 <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
                   <h3 className="font-semibold text-white mb-4">Style Tips for Your Body Type</h3>
-                  <ul className="space-y-2">
+                  <div className="grid gap-2">
                     {result.silhouetteTips.map((tip, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-zinc-400">
-                        <Info className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
-                        {tip}
-                      </li>
+                      <div key={i} className="flex items-start gap-3 p-3 bg-zinc-800/50 rounded-lg">
+                        <span className="text-cyan-400">👕</span>
+                        <span className="text-sm text-zinc-300">{tip}</span>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 </div>
               )}
 
-              {/* Disclaimers */}
-              <div className="p-4 bg-zinc-800/30 rounded-xl">
-                <ul className="space-y-1">
-                  {result.disclaimers.map((disclaimer, i) => (
-                    <li key={i} className="flex items-start gap-2 text-xs text-zinc-500">
-                      <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                      {disclaimer}
-                    </li>
-                  ))}
-                </ul>
+              {/* Identity Note */}
+              <div className="p-4 bg-cyan-500/5 border border-cyan-500/10 rounded-xl flex items-start gap-3">
+                <Info className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-zinc-400">
+                  <strong className="text-white">Natural Progress:</strong> This plan works with your body's natural frame. 
+                  Results depend on consistent effort, nutrition, and recovery.
+                </div>
               </div>
 
               {/* Actions */}
-              <div className="flex gap-4">
+              <div className="flex flex-wrap gap-4">
                 <button
                   onClick={() => setPageState('customize')}
                   className="px-6 py-3 bg-zinc-800 text-white rounded-xl flex items-center gap-2 hover:bg-zinc-700"
                 >
                   <RefreshCw className="w-4 h-4" />
-                  Adjust Settings
+                  Try Different Goals
                 </button>
                 <button
                   onClick={handleReset}
@@ -637,16 +661,6 @@ export default function BodyPreviewContent() {
                   <ImagePlus className="w-4 h-4" />
                   New Photo
                 </button>
-                {result.images[0]?.url && (
-                  <a
-                    href={result.images[0].url}
-                    download="best-physique.png"
-                    className="px-6 py-3 bg-cyan-500 text-white rounded-xl flex items-center gap-2 hover:bg-cyan-600"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download
-                  </a>
-                )}
               </div>
             </motion.div>
           )}
