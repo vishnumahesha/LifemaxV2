@@ -1,25 +1,84 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getVisionModel, getImageGenerationModel, base64ToGenerativePart, extractJSON } from '@/lib/gemini';
-import { success, error, ErrorCodes } from '@/types/api';
 import { z } from 'zod';
+import { getImageGenerationModel, base64ToGenerativePart, extractJSON } from '@/lib/gemini';
+import { success, error, ErrorCodes } from '@/types/api';
+import { computeImageHash, getSeedFromHash, getCachedResult, setCachedResult } from '@/lib/scoring';
+import { getFaceStyleRecommendations } from '@/lib/style-library';
+import { 
+  estimateFaceReachability, 
+  getChangeBudget, 
+  describeAppliedChanges,
+  type FacePreviewOptions 
+} from '@/lib/reachability';
 
+export const maxDuration = 60;
+
+const ENDPOINT_VERSION = '2.0.0';
+
+// Request schema following spec
 const requestSchema = z.object({
-  photoBase64: z.string(),
-  settings: z.object({
-    hairstyle: z.string(),
-    glasses: z.string(),
-    enhancement: z.number().min(1).max(10),
+  frontPhotoBase64: z.string().min(100),
+  sidePhotoBase64: z.string().optional(),
+  faceShape: z.enum(['oval', 'round', 'square', 'heart', 'diamond', 'oblong']).optional(),
+  faceShapeConfidence: z.number().min(0).max(1).optional().default(0.7),
+  photoQuality: z.number().min(0).max(1).optional().default(0.7),
+  currentHairLength: z.enum(['short', 'medium', 'long']).optional().default('short'),
+  isMinor: z.boolean().optional().default(false),
+  options: z.object({
+    level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    hairstyle: z.object({
+      length: z.enum(['short', 'medium', 'long']),
+      finish: z.enum(['textured', 'clean']),
+    }),
+    glasses: z.object({
+      enabled: z.boolean(),
+      style: z.enum(['round', 'rectangular', 'browline', 'aviator', 'geometric']).optional(),
+    }),
+    grooming: z.object({
+      facialHair: z.enum(['none', 'stubble', 'trimmed']).optional(),
+      brows: z.enum(['natural', 'cleaned']).optional(),
+    }).optional(),
+    lighting: z.enum(['neutral_soft', 'studio_soft', 'outdoor_shade']).optional(),
   }),
 });
 
-interface PreviewResponse {
-  images: Array<{
-    imageUrl: string;
-    description: string;
-  }>;
+// Response types
+interface PreviewImage {
+  url: string;
+  seed: number;
 }
 
-export const maxDuration = 120; // Image generation can take longer
+interface HairstyleChip {
+  label: string;
+  preset: {
+    length: 'short' | 'medium' | 'long';
+    finish: 'textured' | 'clean';
+  };
+  reason: string;
+}
+
+interface GlassesChip {
+  label: string;
+  preset: {
+    style: 'round' | 'rectangular' | 'browline' | 'aviator' | 'geometric';
+  };
+  reason: string;
+}
+
+interface PreviewResponse {
+  images: PreviewImage[];
+  disclaimers: string[];
+  appliedChanges: string[];
+  recommendedOptions: {
+    hairstyleChips: HairstyleChip[];
+    glassesChips: GlassesChip[];
+  };
+  reachability: {
+    estimatedWeeks: { min: number; max: number };
+    confidence: number;
+    assumptions: string[];
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,227 +87,276 @@ export async function POST(request: NextRequest) {
 
     if (!validation.success) {
       return NextResponse.json(
-        error(ErrorCodes.VALIDATION_ERROR, 'Invalid request data', {
-          errors: validation.error.flatten().fieldErrors
+        error(ErrorCodes.VALIDATION_ERROR, 'Invalid request', {
+          errors: validation.error.flatten().fieldErrors,
         }),
         { status: 400 }
       );
     }
 
-    const { photoBase64, settings } = validation.data;
+    const {
+      frontPhotoBase64,
+      sidePhotoBase64,
+      faceShape,
+      faceShapeConfidence,
+      photoQuality,
+      currentHairLength,
+      isMinor,
+      options,
+    } = validation.data;
 
+    // Enforce minor restrictions
+    const effectiveLevel = isMinor ? 1 : options.level;
+    const effectiveOptions: FacePreviewOptions = {
+      ...options,
+      level: effectiveLevel as 1 | 2 | 3,
+    };
+
+    // Compute hash for caching/determinism
+    const imageHash = computeImageHash(frontPhotoBase64);
+    const optionsHash = JSON.stringify(effectiveOptions);
+    const cacheKey = `${imageHash}-${optionsHash}`;
+    const seed = getSeedFromHash(imageHash + optionsHash.slice(0, 16));
+
+    // Check cache
+    const cachedResult = getCachedResult<PreviewResponse>(cacheKey, ENDPOINT_VERSION);
+    if (cachedResult) {
+      console.log('Returning cached preview for hash:', imageHash.slice(0, 8));
+      return NextResponse.json(success(cachedResult));
+    }
+
+    // Check API key
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json(
-        error(ErrorCodes.SERVER_ERROR, 'AI service not configured. Please add GEMINI_API_KEY.'),
+        error(ErrorCodes.SERVER_ERROR, 'AI service not configured'),
         { status: 500 }
       );
     }
 
-    console.log('Starting best version generation...');
+    // Get change budget for this level
+    const changeBudget = getChangeBudget(effectiveLevel as 1 | 2 | 3);
 
-    // First, analyze the face to get details
-    const analysisPrompt = `Analyze this face photo and provide a detailed description for image generation.
+    // Build identity-preserving prompt
+    const prompt = buildPreviewPrompt(effectiveOptions, changeBudget, isMinor);
 
-Describe:
-1. The person's apparent gender, age range, ethnicity
-2. Face shape (oval, round, square, heart, etc.)
-3. Current hairstyle (color, length, texture, style)
-4. Eye color and shape
-5. Any distinctive features
-6. Current makeup/grooming style if visible
+    console.log('Generating face preview with seed:', seed);
 
-Return a JSON with:
-{
-  "gender": "male/female",
-  "ageRange": "20s/30s/etc",
-  "faceShape": "oval/round/etc",
-  "currentHair": "description",
-  "eyeColor": "color",
-  "skinTone": "description",
-  "distinctiveFeatures": ["list"],
-  "currentStyle": "description"
-}
-
-Return ONLY valid JSON.`;
-
-    const imagePart = base64ToGenerativePart(photoBase64, 'image/jpeg');
-    const visionModel = getVisionModel();
-    
-    let faceAnalysis;
-    try {
-      const analysisResult = await visionModel.generateContent([analysisPrompt, imagePart]);
-      const analysisText = analysisResult.response.text();
-      faceAnalysis = extractJSON<{
-        gender: string;
-        ageRange: string;
-        faceShape: string;
-        currentHair: string;
-        eyeColor: string;
-        skinTone: string;
-        distinctiveFeatures: string[];
-        currentStyle: string;
-      }>(analysisText);
-      console.log('Face analysis complete:', faceAnalysis);
-    } catch (analysisError) {
-      console.error('Face analysis failed:', analysisError);
-      // Continue with default values
-      faceAnalysis = {
-        gender: 'person',
-        ageRange: 'adult',
-        faceShape: 'oval',
-        currentHair: 'natural hair',
-        eyeColor: 'natural',
-        skinTone: 'natural',
-        distinctiveFeatures: [],
-        currentStyle: 'natural'
-      };
+    // Call Gemini
+    const model = getImageGenerationModel();
+    const imageParts = [base64ToGenerativePart(frontPhotoBase64, 'image/jpeg')];
+    if (sidePhotoBase64) {
+      imageParts.push(base64ToGenerativePart(sidePhotoBase64, 'image/jpeg'));
     }
 
-    // Build the image generation prompt
-    const hairstyleDescriptions: Record<string, string> = {
-      'current': faceAnalysis.currentHair,
-      'optimized': `professionally styled ${faceAnalysis.currentHair} that perfectly frames a ${faceAnalysis.faceShape} face`,
-      'short': 'stylish short haircut with clean edges and modern texture',
-      'medium': 'elegant medium-length hair with soft layers and movement',
-      'long': 'flowing long hair with healthy shine and gentle waves',
-    };
-
-    const glassesDescriptions: Record<string, string> = {
-      'none': 'no glasses',
-      'current': 'current eyewear style',
-      'minimal': 'sleek minimalist thin-framed glasses',
-      'bold': 'stylish bold-framed designer glasses',
-    };
-
-    const enhancementLevel = settings.enhancement <= 3 ? 'subtle natural' : 
-                            settings.enhancement <= 6 ? 'moderate' : 'noticeable';
-
-    const imagePrompt = `Generate a photorealistic portrait of a ${faceAnalysis.gender} in their ${faceAnalysis.ageRange} with ${faceAnalysis.faceShape} face shape, ${faceAnalysis.skinTone} skin, and ${faceAnalysis.eyeColor} eyes.
-
-Key features to include:
-- ${hairstyleDescriptions[settings.hairstyle] || 'stylish modern haircut'}
-- ${glassesDescriptions[settings.glasses] || 'no glasses'}
-- ${enhancementLevel} beauty enhancement: clear glowing skin, well-groomed appearance
-- Professional headshot style, soft studio lighting
-- Confident, approachable expression
-- High-end fashion magazine quality
-
-The person should look like an enhanced, more polished version of themselves - NOT a different person.
-Keep their distinctive features: ${faceAnalysis.distinctiveFeatures.join(', ') || 'natural features'}.
-
-Style: Professional headshot, editorial quality, natural but polished look.`;
-
-    console.log('Attempting image generation...');
-    
-    // Try image generation
-    let generatedImageUrl: string | null = null;
-    let description = '';
-    
+    let result;
     try {
-      const imageModel = getImageGenerationModel();
-      
-      // Try to generate with the image as reference
-      const imageResult = await imageModel.generateContent({
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: imagePrompt },
-            imagePart
-          ]
-        }],
-        generationConfig: {
-          // @ts-ignore - responseModalities is a valid config for image generation
-          responseModalities: ['image', 'text'],
-        }
-      });
-      
-      const response = imageResult.response;
-      
-      // Check for generated image in response
-      const candidates = response.candidates;
-      if (candidates && candidates.length > 0) {
-        const parts = candidates[0].content?.parts || [];
-        for (const part of parts) {
-          // @ts-ignore - inlineData might be present
-          if (part.inlineData?.data) {
-            // @ts-ignore
-            const mimeType = part.inlineData.mimeType || 'image/png';
-            // @ts-ignore
-            generatedImageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
-            console.log('Generated image successfully!');
-            break;
-          }
-          // @ts-ignore
-          if (part.text) {
-            // @ts-ignore
-            description = part.text;
-          }
-        }
-      }
-    } catch (genError) {
-      console.error('Image generation failed:', genError);
-      const errorMessage = genError instanceof Error ? genError.message : 'Unknown error';
-      
-      if (errorMessage.includes('quota') || errorMessage.includes('rate') || errorMessage.includes('429')) {
+      result = await model.generateContent([prompt, ...imageParts]);
+    } catch (apiError) {
+      console.error('Preview generation failed:', apiError);
+      const errorMessage = apiError instanceof Error ? apiError.message : 'Unknown';
+
+      if (errorMessage.includes('quota') || errorMessage.includes('rate')) {
         return NextResponse.json(
-          error(ErrorCodes.RATE_LIMITED, 'API rate limit reached. Please wait a minute and try again.'),
+          error(ErrorCodes.RATE_LIMITED, 'Please wait and try again'),
           { status: 429 }
         );
       }
-      
-      // Fall back to text description
-      console.log('Falling back to text description...');
-    }
-
-    // If image generation failed, provide detailed recommendations
-    if (!generatedImageUrl) {
-      console.log('No image generated, providing text recommendations...');
-      
-      const recommendationPrompt = `Based on this face photo, provide specific styling recommendations for their "best version".
-
-Settings:
-- Hairstyle: ${settings.hairstyle}
-- Glasses: ${settings.glasses}  
-- Enhancement level: ${settings.enhancement}/10
-
-Provide a detailed, encouraging description of how they would look with optimal styling.
-Focus on: hairstyle changes, grooming, skincare improvements, and overall presentation.
-Do NOT suggest bone structure or surgical changes.
-
-Return a single paragraph description (2-3 sentences) of their enhanced look.`;
-
-      try {
-        const recResult = await visionModel.generateContent([recommendationPrompt, imagePart]);
-        description = recResult.response.text();
-      } catch (e) {
-        description = `Your best version with ${settings.hairstyle} hairstyle styling and ${settings.glasses === 'none' ? 'no glasses' : settings.glasses + ' frames'}. With the right grooming and presentation, you can enhance your natural features beautifully.`;
+      if (errorMessage.includes('SAFETY') || errorMessage.includes('blocked')) {
+        return NextResponse.json(
+          error(ErrorCodes.ANALYSIS_FAILED, 'Image blocked by safety filters'),
+          { status: 400 }
+        );
       }
-    }
 
-    const previewResponse: PreviewResponse = {
-      images: [{
-        imageUrl: generatedImageUrl || photoBase64,
-        description: description || `Enhanced look with ${settings.hairstyle} hairstyle and optimized styling.`
-      }]
-    };
-
-    console.log('Preview complete!', generatedImageUrl ? 'With generated image' : 'Text only');
-    return NextResponse.json(success(previewResponse));
-
-  } catch (err) {
-    console.error('Preview generation error:', err);
-    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-    
-    if (errorMessage.includes('quota') || errorMessage.includes('rate')) {
       return NextResponse.json(
-        error(ErrorCodes.RATE_LIMITED, 'API rate limit reached. Please wait a minute and try again.'),
-        { status: 429 }
+        error(ErrorCodes.SERVER_ERROR, `Preview generation failed: ${errorMessage}`),
+        { status: 500 }
       );
     }
-    
+
+    const response = await result.response;
+    const text = response.text();
+
+    // Parse response
+    let generatedImages: Array<{ imageUrl?: string; description?: string }> = [];
+    try {
+      const parsed = extractJSON<{ images?: typeof generatedImages }>(text);
+      generatedImages = parsed.images || [];
+    } catch {
+      // If no JSON, treat as description only
+      generatedImages = [{ description: text.slice(0, 200) }];
+    }
+
+    // Build preview images array
+    const previewImages: PreviewImage[] = generatedImages
+      .filter((img) => img.imageUrl)
+      .map((img, idx) => ({
+        url: img.imageUrl!,
+        seed: seed + idx,
+      }));
+
+    // If no actual images generated, return placeholder message
+    if (previewImages.length === 0) {
+      previewImages.push({
+        url: '', // Would be actual generated image URL
+        seed,
+      });
+    }
+
+    // Get style recommendations
+    const styleRecs = getFaceStyleRecommendations(
+      faceShape || 'oval',
+      faceShapeConfidence || 0.7
+    );
+
+    // Build recommendation chips
+    const hairstyleChips: HairstyleChip[] = styleRecs.haircuts.slice(0, 3).map((cut) => ({
+      label: cut.label,
+      preset: {
+        length: cut.length,
+        finish: cut.finish,
+      },
+      reason: cut.suitability,
+    }));
+
+    const glassesChips: GlassesChip[] = styleRecs.glasses.slice(0, 3).map((g) => ({
+      label: g.label,
+      preset: { style: g.style },
+      reason: g.suitability,
+    }));
+
+    // Calculate reachability
+    const reachability = estimateFaceReachability(
+      effectiveOptions,
+      currentHairLength || 'short',
+      photoQuality || 0.7
+    );
+
+    // Describe what changed
+    const appliedChanges = describeAppliedChanges(effectiveOptions, 'face');
+
+    // Build disclaimers
+    const disclaimers = [
+      'Identity-preserving preview. Does not change bone structure, jaw, nose, or eye shape.',
+      'Estimated timelines are ranges and vary by individual.',
+    ];
+    if (isMinor) {
+      disclaimers.push('Minor detected: showing subtle styling improvements only.');
+    }
+    if (effectiveLevel < options.level) {
+      disclaimers.push(`Enhancement level reduced to ${effectiveLevel} for safety.`);
+    }
+
+    // Build final response
+    const previewResponse: PreviewResponse = {
+      images: previewImages,
+      disclaimers,
+      appliedChanges,
+      recommendedOptions: {
+        hairstyleChips,
+        glassesChips,
+      },
+      reachability,
+    };
+
+    // Cache result
+    setCachedResult(cacheKey, ENDPOINT_VERSION, previewResponse);
+
+    return NextResponse.json(success(previewResponse));
+  } catch (err) {
+    console.error('Face preview error:', err);
     return NextResponse.json(
-      error(ErrorCodes.SERVER_ERROR, `Failed to generate preview: ${errorMessage}`),
+      error(ErrorCodes.SERVER_ERROR, 'Preview generation failed'),
       { status: 500 }
     );
   }
+}
+
+function buildPreviewPrompt(
+  options: FacePreviewOptions,
+  changeBudget: ReturnType<typeof getChangeBudget>,
+  isMinor: boolean
+): string {
+  const levelDescriptions = {
+    1: 'subtle same-day improvements only (hair tidy, lighting, minor cleanup)',
+    2: 'moderate realistic changes achievable in weeks/months (new haircut, consistent grooming, clearer skin)',
+    3: 'maximum realistic modifiable factors (still identity-preserving, months of consistent effort)',
+  };
+
+  let enhancementInstructions = '';
+  
+  if (changeBudget.hair === 'tidy_only') {
+    enhancementInstructions += '- Hair: Only tidy and shape existing hair, no dramatic length change\n';
+  } else if (changeBudget.hair === 'minor_cut') {
+    enhancementInstructions += `- Hair: Show a ${options.hairstyle.length} length ${options.hairstyle.finish} style (plausible within one haircut session)\n`;
+  } else {
+    enhancementInstructions += `- Hair: Show a complete ${options.hairstyle.length} ${options.hairstyle.finish} style transformation\n`;
+  }
+
+  if (changeBudget.skin === 'lighting_only') {
+    enhancementInstructions += '- Skin: Improve lighting/exposure only, no texture changes\n';
+  } else if (changeBudget.skin === 'minor_clarity') {
+    enhancementInstructions += '- Skin: Subtle clarity improvement, still show natural texture and pores\n';
+  } else {
+    enhancementInstructions += '- Skin: Clearer complexion but MUST preserve natural skin texture (no porcelain blur)\n';
+  }
+
+  if (options.glasses.enabled && options.glasses.style) {
+    enhancementInstructions += `- Glasses: Add ${options.glasses.style} frame glasses\n`;
+  }
+
+  if (options.grooming?.facialHair && options.grooming.facialHair !== 'none') {
+    enhancementInstructions += `- Facial hair: ${options.grooming.facialHair}\n`;
+  }
+  if (options.grooming?.brows === 'cleaned') {
+    enhancementInstructions += '- Eyebrows: Cleaned and tidied\n';
+  }
+
+  if (options.lighting) {
+    const lightingMap: Record<string, string> = {
+      neutral_soft: 'soft neutral lighting',
+      studio_soft: 'studio-quality soft lighting',
+      outdoor_shade: 'natural outdoor shade lighting',
+    };
+    enhancementInstructions += `- Lighting: ${lightingMap[options.lighting]}\n`;
+  }
+
+  const minorNote = isMinor
+    ? '\nIMPORTANT: Subject appears to be a minor. Only apply subtle styling/grooming improvements. No attractiveness-focused changes.'
+    : '';
+
+  return `You are an identity-preserving image enhancement AI. Generate a "best version" preview of this person.
+
+CRITICAL CONSTRAINTS (MUST FOLLOW):
+1. PRESERVE IDENTITY: Same person, same face. Do NOT change:
+   - Bone structure
+   - Jaw shape or width
+   - Nose size or shape
+   - Eye shape
+   - Skull shape
+   - Any anatomical features
+2. NO "DIFFERENT PERSON": The output must be recognizably the same individual
+3. ONLY MODIFY MODIFIABLE FACTORS as specified below
+
+Enhancement Level: ${options.level} (${levelDescriptions[options.level]})
+
+ALLOWED CHANGES FOR THIS LEVEL:
+${enhancementInstructions}
+${minorNote}
+
+ANGLE: Eye-level only, no distorting angles.
+
+Generate a realistic preview showing what this person could look like with these modifiable improvements.
+
+Return JSON:
+{
+  "images": [
+    {
+      "imageUrl": "base64_encoded_image_data",
+      "description": "Brief description of changes applied"
+    }
+  ]
+}
+
+Return ONLY valid JSON.`;
 }

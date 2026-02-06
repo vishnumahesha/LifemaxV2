@@ -1,21 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { 
-  Wand2, 
-  Sparkles, 
-  ArrowRight, 
-  ArrowLeft, 
-  RefreshCw, 
-  Download, 
+import {
+  Wand2,
+  Sparkles,
+  ArrowRight,
+  ArrowLeft,
+  RefreshCw,
+  Download,
   ImagePlus,
-  Sliders,
   Eye,
   Scissors,
-  GlassWater,
-  Camera
+  Timer,
+  Check,
+  Info,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
 import { PhotoUpload } from '@/components/PhotoUpload';
@@ -23,18 +26,54 @@ import type { ApiResult } from '@/types/api';
 
 type PageState = 'upload' | 'customize' | 'generating' | 'results';
 
-interface BestVersionSettings {
-  hairstyle: 'current' | 'optimized' | 'short' | 'medium' | 'long';
-  glasses: 'none' | 'current' | 'minimal' | 'bold';
-  enhancement: number; // 1-10
+// Enhancement level: 1 (subtle), 2 (moderate), 3 (strong realistic)
+type EnhancementLevel = 1 | 2 | 3;
+
+interface PreviewOptions {
+  level: EnhancementLevel;
+  hairstyle: {
+    length: 'short' | 'medium' | 'long';
+    finish: 'textured' | 'clean';
+  };
+  glasses: {
+    enabled: boolean;
+    style?: 'round' | 'rectangular' | 'browline' | 'aviator' | 'geometric';
+  };
+  grooming?: {
+    facialHair?: 'none' | 'stubble' | 'trimmed';
+    brows?: 'natural' | 'cleaned';
+  };
+  lighting?: 'neutral_soft' | 'studio_soft' | 'outdoor_shade';
 }
 
-interface GeneratedImage {
-  imageUrl: string;
-  description: string;
+interface HairstyleChip {
+  label: string;
+  preset: { length: 'short' | 'medium' | 'long'; finish: 'textured' | 'clean' };
+  reason: string;
 }
 
-// Animated background orbs
+interface GlassesChip {
+  label: string;
+  preset: { style: 'round' | 'rectangular' | 'browline' | 'aviator' | 'geometric' };
+  reason: string;
+}
+
+interface PreviewResult {
+  images: Array<{ url: string; seed: number }>;
+  disclaimers: string[];
+  appliedChanges: string[];
+  recommendedOptions: {
+    hairstyleChips: HairstyleChip[];
+    glassesChips: GlassesChip[];
+  };
+  reachability: {
+    estimatedWeeks: { min: number; max: number };
+    confidence: number;
+    assumptions: string[];
+  };
+}
+
+// Animated background
 function BackgroundOrbs() {
   return (
     <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -45,38 +84,37 @@ function BackgroundOrbs() {
   );
 }
 
-// Option selector
-function OptionSelector({ 
-  label, 
-  options, 
-  value, 
-  onChange,
-  icon: Icon
-}: { 
-  label: string;
-  options: { value: string; label: string }[];
-  value: string;
-  onChange: (value: string) => void;
-  icon: any;
-}) {
+// Enhancement Level Selector
+function LevelSelector({ value, onChange }: { value: EnhancementLevel; onChange: (v: EnhancementLevel) => void }) {
+  const levels = [
+    { value: 1 as const, label: 'Subtle', desc: 'Same-day improvements', time: '0-2 weeks' },
+    { value: 2 as const, label: 'Moderate', desc: 'Weeks of consistent effort', time: '4-12 weeks' },
+    { value: 3 as const, label: 'Maximum', desc: 'Months of dedication', time: '8-20+ weeks' },
+  ];
+
   return (
     <div className="mb-6">
       <label className="flex items-center gap-2 text-sm font-medium text-zinc-400 mb-3">
-        <Icon className="w-4 h-4 text-pink-400" />
-        {label}
+        <Sparkles className="w-4 h-4 text-pink-400" />
+        Enhancement Level
       </label>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => (
+      <div className="grid grid-cols-3 gap-3">
+        {levels.map((level) => (
           <button
-            key={option.value}
-            onClick={() => onChange(option.value)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-              value === option.value 
-                ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/30' 
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+            key={level.value}
+            onClick={() => onChange(level.value)}
+            className={`p-4 rounded-xl border transition-all text-left ${
+              value === level.value
+                ? 'bg-pink-500/20 border-pink-500 text-white'
+                : 'bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-600'
             }`}
           >
-            {option.label}
+            <div className="font-semibold mb-1">{level.label}</div>
+            <div className="text-xs opacity-70">{level.desc}</div>
+            <div className="text-xs mt-2 flex items-center gap-1">
+              <Timer className="w-3 h-3" />
+              {level.time}
+            </div>
           </button>
         ))}
       </div>
@@ -84,522 +122,579 @@ function OptionSelector({
   );
 }
 
-// Enhancement slider
-function EnhancementSlider({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+// Hairstyle Selector with recommendation chips
+function HairstyleSelector({
+  value,
+  onChange,
+  recommendedChips,
+}: {
+  value: { length: string; finish: string };
+  onChange: (v: { length: 'short' | 'medium' | 'long'; finish: 'textured' | 'clean' }) => void;
+  recommendedChips: HairstyleChip[];
+}) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
   return (
     <div className="mb-6">
-      <label className="flex items-center justify-between text-sm font-medium text-zinc-400 mb-3">
-        <span className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-pink-400" />
-          Enhancement Level
-        </span>
-        <span className="text-pink-400">{value}/10</span>
+      <label className="flex items-center gap-2 text-sm font-medium text-zinc-400 mb-3">
+        <Scissors className="w-4 h-4 text-pink-400" />
+        Hairstyle
       </label>
-      <div className="relative">
-        <input
-          type="range"
-          min="1"
-          max="10"
-          value={value}
-          onChange={(e) => onChange(parseInt(e.target.value))}
-          className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-pink-500"
-          style={{
-            background: `linear-gradient(to right, rgb(236 72 153) 0%, rgb(236 72 153) ${(value - 1) * 11.1}%, rgb(39 39 42) ${(value - 1) * 11.1}%, rgb(39 39 42) 100%)`
-          }}
-        />
-      </div>
-      <div className="flex justify-between text-xs text-zinc-500 mt-2">
-        <span>Subtle</span>
-        <span>Natural</span>
-        <span>Enhanced</span>
-      </div>
+
+      {/* Recommended Chips */}
+      {recommendedChips.length > 0 && (
+        <div className="mb-3">
+          <div className="text-xs text-zinc-500 mb-2">Recommended for your face shape:</div>
+          <div className="flex flex-wrap gap-2">
+            {recommendedChips.map((chip, i) => (
+              <button
+                key={i}
+                onClick={() => onChange(chip.preset)}
+                className={`px-3 py-2 rounded-lg text-sm transition-all flex items-center gap-2 ${
+                  value.length === chip.preset.length && value.finish === chip.preset.finish
+                    ? 'bg-pink-500 text-white'
+                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                }`}
+                title={chip.reason}
+              >
+                {chip.label}
+                {value.length === chip.preset.length && value.finish === chip.preset.finish && (
+                  <Check className="w-3 h-3" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Advanced Options Toggle */}
+      <button
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        className="text-xs text-zinc-500 hover:text-zinc-400 flex items-center gap-1 mt-2"
+      >
+        {showAdvanced ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        {showAdvanced ? 'Hide options' : 'Custom options'}
+      </button>
+
+      {showAdvanced && (
+        <div className="mt-3 p-4 bg-zinc-800/50 rounded-xl space-y-4">
+          <div>
+            <div className="text-xs text-zinc-500 mb-2">Length</div>
+            <div className="flex gap-2">
+              {(['short', 'medium', 'long'] as const).map((len) => (
+                <button
+                  key={len}
+                  onClick={() => onChange({ ...value, length: len } as { length: 'short' | 'medium' | 'long'; finish: 'textured' | 'clean' })}
+                  className={`px-3 py-1.5 rounded-lg text-sm capitalize ${
+                    value.length === len ? 'bg-pink-500 text-white' : 'bg-zinc-700 text-zinc-400'
+                  }`}
+                >
+                  {len}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-zinc-500 mb-2">Finish</div>
+            <div className="flex gap-2">
+              {(['textured', 'clean'] as const).map((fin) => (
+                <button
+                  key={fin}
+                  onClick={() => onChange({ ...value, finish: fin } as { length: 'short' | 'medium' | 'long'; finish: 'textured' | 'clean' })}
+                  className={`px-3 py-1.5 rounded-lg text-sm capitalize ${
+                    value.finish === fin ? 'bg-pink-500 text-white' : 'bg-zinc-700 text-zinc-400'
+                  }`}
+                >
+                  {fin}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// Before/After comparison
-function BeforeAfterComparison({ before, after }: { before: string; after: string }) {
-  const [showAfter, setShowAfter] = useState(true);
+// Glasses Selector
+type GlassesStyle = 'round' | 'rectangular' | 'browline' | 'aviator' | 'geometric';
+
+function GlassesSelector({
+  value,
+  onChange,
+  recommendedChips,
+}: {
+  value: { enabled: boolean; style?: GlassesStyle };
+  onChange: (v: { enabled: boolean; style?: GlassesStyle }) => void;
+  recommendedChips: GlassesChip[];
+}) {
+  return (
+    <div className="mb-6">
+      <label className="flex items-center gap-2 text-sm font-medium text-zinc-400 mb-3">
+        <Eye className="w-4 h-4 text-pink-400" />
+        Glasses
+      </label>
+
+      {/* Toggle */}
+      <div className="flex gap-2 mb-3">
+        <button
+          onClick={() => onChange({ enabled: false })}
+          className={`px-4 py-2 rounded-lg text-sm ${
+            !value.enabled ? 'bg-pink-500 text-white' : 'bg-zinc-800 text-zinc-400'
+          }`}
+        >
+          None
+        </button>
+        <button
+          onClick={() => onChange({ enabled: true, style: value.style || 'rectangular' })}
+          className={`px-4 py-2 rounded-lg text-sm ${
+            value.enabled ? 'bg-pink-500 text-white' : 'bg-zinc-800 text-zinc-400'
+          }`}
+        >
+          Add Glasses
+        </button>
+      </div>
+
+      {/* Style options when enabled */}
+      {value.enabled && (
+        <div className="p-4 bg-zinc-800/50 rounded-xl">
+          {recommendedChips.length > 0 && (
+            <div className="mb-3">
+              <div className="text-xs text-zinc-500 mb-2">Recommended frames:</div>
+              <div className="flex flex-wrap gap-2">
+                {recommendedChips.map((chip, i) => (
+                  <button
+                    key={i}
+                    onClick={() => onChange({ enabled: true, style: chip.preset.style })}
+                    className={`px-3 py-2 rounded-lg text-sm ${
+                      value.style === chip.preset.style
+                        ? 'bg-pink-500 text-white'
+                        : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600'
+                    }`}
+                    title={chip.reason}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="text-xs text-zinc-500 mb-2">All styles:</div>
+          <div className="flex flex-wrap gap-2">
+            {(['round', 'rectangular', 'browline', 'aviator', 'geometric'] as const).map((style) => (
+              <button
+                key={style}
+                onClick={() => onChange({ enabled: true, style })}
+                className={`px-3 py-1.5 rounded-lg text-sm capitalize ${
+                  value.style === style ? 'bg-pink-500 text-white' : 'bg-zinc-700 text-zinc-400'
+                }`}
+              >
+                {style}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Reachability Display
+function ReachabilityCard({
+  reachability,
+}: {
+  reachability: PreviewResult['reachability'];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const confidenceLabel =
+    reachability.confidence >= 0.7 ? 'High' : reachability.confidence >= 0.5 ? 'Medium' : 'Low';
+  const confidenceColor =
+    reachability.confidence >= 0.7 ? 'text-green-400' : reachability.confidence >= 0.5 ? 'text-yellow-400' : 'text-orange-400';
 
   return (
-    <div className="relative rounded-3xl overflow-hidden bg-zinc-900 border border-pink-500/30">
-      {/* Image display */}
-      <div className="relative aspect-square">
-        <AnimatePresence mode="wait">
-          {showAfter ? (
-            <motion.img
-              key="after"
-              src={after}
-              alt="Enhanced version"
-              className="w-full h-full object-cover"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            />
-          ) : (
-            <motion.img
-              key="before"
-              src={before}
-              alt="Original"
-              className="w-full h-full object-cover"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            />
-          )}
-        </AnimatePresence>
-        
-        {/* Label */}
-        <div className="absolute top-4 left-4">
-          <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${
-            showAfter 
-              ? 'bg-pink-500/90 text-white' 
-              : 'bg-zinc-800/90 text-zinc-300'
-          }`}>
-            {showAfter ? '✨ Enhanced' : 'Original'}
-          </span>
-        </div>
-
-        {/* Glow effect */}
-        {showAfter && (
-          <div className="absolute inset-0 bg-gradient-to-t from-pink-500/10 to-transparent pointer-events-none" />
-        )}
+    <div className="p-4 bg-zinc-800/50 rounded-xl border border-zinc-700">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="font-semibold text-white flex items-center gap-2">
+          <Timer className="w-4 h-4 text-pink-400" />
+          Time to Reach This Look
+        </h4>
+        <span className={`text-sm ${confidenceColor}`}>{confidenceLabel} confidence</span>
       </div>
 
-      {/* Toggle button */}
+      <div className="text-2xl font-bold text-pink-400 mb-2">
+        {reachability.estimatedWeeks.min === reachability.estimatedWeeks.max
+          ? `~${reachability.estimatedWeeks.min} weeks`
+          : `${reachability.estimatedWeeks.min}-${reachability.estimatedWeeks.max} weeks`}
+      </div>
+
       <button
-        onClick={() => setShowAfter(!showAfter)}
-        className="absolute bottom-4 right-4 flex items-center gap-2 px-4 py-2 bg-zinc-900/90 border border-zinc-700 rounded-full text-sm text-white hover:bg-zinc-800 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+        className="text-xs text-zinc-500 hover:text-zinc-400 flex items-center gap-1"
       >
-        <Eye className="w-4 h-4" />
-        {showAfter ? 'See Original' : 'See Enhanced'}
+        {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        {expanded ? 'Hide assumptions' : 'View assumptions'}
       </button>
+
+      {expanded && (
+        <ul className="mt-3 space-y-1">
+          {reachability.assumptions.map((assumption, i) => (
+            <li key={i} className="text-xs text-zinc-500 flex items-start gap-2">
+              <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+              {assumption}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
+// Main Component
 export default function BestVersionContent() {
   const [pageState, setPageState] = useState<PageState>('upload');
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [generationProgress, setGenerationProgress] = useState(0);
-  const [settings, setSettings] = useState<BestVersionSettings>({
-    hairstyle: 'optimized',
-    glasses: 'none',
-    enhancement: 5,
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [sidePhotoPreview, setSidePhotoPreview] = useState<string | null>(null);
+  const [faceScanData, setFaceScanData] = useState<{ faceShape?: string; faceShapeConfidence?: number } | null>(null);
+
+  const [options, setOptions] = useState<PreviewOptions>({
+    level: 2,
+    hairstyle: { length: 'short', finish: 'textured' },
+    glasses: { enabled: false },
+    grooming: { brows: 'natural' },
+    lighting: 'neutral_soft',
   });
-  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
-  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
-  const hairstyleOptions = [
-    { value: 'current', label: 'Keep Current' },
-    { value: 'optimized', label: 'AI Optimized' },
-    { value: 'short', label: 'Short' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'long', label: 'Long' },
-  ];
+  const [result, setResult] = useState<PreviewResult | null>(null);
+  const [recommendedChips, setRecommendedChips] = useState<{
+    hairstyleChips: HairstyleChip[];
+    glassesChips: GlassesChip[];
+  }>({ hairstyleChips: [], glassesChips: [] });
 
-  const glassesOptions = [
-    { value: 'none', label: 'No Glasses' },
-    { value: 'current', label: 'Keep Current' },
-    { value: 'minimal', label: 'Minimal Frames' },
-    { value: 'bold', label: 'Bold Frames' },
-  ];
-
-  const handleContinue = () => {
-    if (!photo) {
-      toast.error('Please upload a photo first');
-      return;
+  // Load face scan data from localStorage if available
+  useEffect(() => {
+    const savedScan = localStorage.getItem('lastFaceScan');
+    if (savedScan) {
+      try {
+        const data = JSON.parse(savedScan);
+        setFaceScanData({
+          faceShape: data.faceShape?.label,
+          faceShapeConfidence: data.faceShape?.confidence,
+        });
+        // Set recommended defaults
+        if (data.stylingRecommendations?.haircuts) {
+          // Could pre-populate from scan data
+        }
+      } catch {
+        // Ignore parse errors
+      }
     }
-    setPageState('customize');
+  }, []);
+
+  const handlePhotoChange = (base64: string | null) => {
+    setPhotoPreview(base64);
+    if (base64) {
+      setPageState('customize');
+    }
   };
 
   const handleGenerate = async () => {
-    setPageState('generating');
-    setGenerationProgress(0);
+    if (!photoPreview) {
+      toast.error('Please upload a photo first');
+      return;
+    }
 
-    const progressInterval = setInterval(() => {
-      setGenerationProgress(prev => {
-        if (prev >= 90) {
-          clearInterval(progressInterval);
-          return 90;
-        }
-        return prev + Math.random() * 10;
-      });
-    }, 600);
+    setPageState('generating');
 
     try {
       const response = await fetch('/api/face/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          photoBase64: photo,
-          settings: settings,
+          frontPhotoBase64: photoPreview,
+          sidePhotoBase64: sidePhotoPreview,
+          faceShape: faceScanData?.faceShape,
+          faceShapeConfidence: faceScanData?.faceShapeConfidence,
+          options,
         }),
       });
 
-      const data: ApiResult<{ images: GeneratedImage[] }> = await response.json();
-
-      clearInterval(progressInterval);
-      setGenerationProgress(100);
+      const data: ApiResult<PreviewResult> = await response.json();
 
       if (!data.ok) {
-        toast.error(data.error.message);
-        setPageState('customize');
-        return;
+        throw new Error(data.error.message);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Use placeholder if no images returned
-      if (!data.data.images || data.data.images.length === 0) {
-        setGeneratedImages([{
-          imageUrl: photo || '',
-          description: 'Enhanced version with optimized styling'
-        }]);
-      } else {
-        setGeneratedImages(data.data.images);
-      }
+      setResult(data.data);
+      setRecommendedChips(data.data.recommendedOptions);
       setPageState('results');
-
-    } catch (error) {
-      clearInterval(progressInterval);
-      console.error('Generation error:', error);
-      toast.error('Failed to generate preview. Please try again.');
+      toast.success('Preview generated!');
+    } catch (err) {
+      console.error(err);
+      toast.error(err instanceof Error ? err.message : 'Failed to generate preview');
       setPageState('customize');
     }
   };
 
   const handleReset = () => {
     setPageState('upload');
-    setPhoto(null);
-    setGeneratedImages([]);
-    setSelectedImageIndex(0);
-    setGenerationProgress(0);
+    setPhotoPreview(null);
+    setSidePhotoPreview(null);
+    setResult(null);
   };
 
   return (
     <AppShell>
       <BackgroundOrbs />
-      <div className="relative min-h-screen px-4 py-8 pb-24">
-        <div className="max-w-2xl mx-auto">
-          {/* Header */}
+
+      <div className="max-w-4xl mx-auto px-4 py-8 relative z-10">
+        {/* Header */}
+        <div className="text-center mb-8">
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center mb-10"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-pink-500/10 border border-pink-500/20 rounded-full mb-4"
           >
-            <motion.div 
-              className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-b from-pink-500/30 to-pink-500/10 border border-pink-500/30 mb-6"
-              animate={{ 
-                boxShadow: ['0 0 30px rgba(236,72,153,0.3)', '0 0 50px rgba(236,72,153,0.5)', '0 0 30px rgba(236,72,153,0.3)']
-              }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
-              <Wand2 className="w-10 h-10 text-pink-400" />
-            </motion.div>
-            <h1 className="text-4xl font-bold text-white mb-3">
-              Best Version Generator
-            </h1>
-            <p className="text-zinc-400 text-lg">
-              {pageState === 'upload' && 'Upload your photo to see your potential'}
-              {pageState === 'customize' && 'Customize your transformation'}
-              {pageState === 'generating' && 'Creating your best version...'}
-              {pageState === 'results' && 'Your transformation is ready'}
-            </p>
+            <Wand2 className="w-4 h-4 text-pink-400" />
+            <span className="text-sm text-pink-400">Identity-Preserving Preview</span>
           </motion.div>
+          <h1 className="text-3xl font-bold text-white mb-2">Your Best Version</h1>
+          <p className="text-zinc-400">See a realistic preview of achievable improvements</p>
+        </div>
 
-          <AnimatePresence mode="wait">
-            {/* Upload State */}
-            {pageState === 'upload' && (
-              <motion.div
-                key="upload"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-6"
-              >
-                <div className="p-1 rounded-3xl bg-gradient-to-b from-pink-500/30 to-zinc-800/30 border border-pink-500/30">
-                  <div className="bg-zinc-900/90 rounded-[22px] p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Camera className="w-5 h-5 text-pink-400" />
-                      <span className="text-sm font-medium text-white">Upload Your Photo</span>
-                    </div>
-                    <PhotoUpload
-                      label=""
-                      required
-                      onPhotoChange={setPhoto}
-                      guidelines={[
-                        'Clear front-facing photo',
-                        'Good lighting',
-                        'No filters or heavy edits',
-                      ]}
-                    />
-                  </div>
+        <AnimatePresence mode="wait">
+          {/* Upload State */}
+          {pageState === 'upload' && (
+            <motion.div
+              key="upload"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <PhotoUpload
+                label="Upload Your Photo"
+                description="Front-facing photo for best results"
+                onPhotoChange={handlePhotoChange}
+                required
+                guidelines={[
+                  'Face the camera directly',
+                  'Good, even lighting',
+                  'Neutral expression',
+                  'No heavy filters',
+                ]}
+              />
+            </motion.div>
+          )}
+
+          {/* Customize State */}
+          {pageState === 'customize' && (
+            <motion.div
+              key="customize"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-6"
+            >
+              {/* Photo Preview */}
+              <div className="flex justify-center mb-6">
+                <div className="w-32 h-32 rounded-xl overflow-hidden border-2 border-pink-500/30">
+                  {photoPreview && (
+                    <img src={photoPreview} alt="Your photo" className="w-full h-full object-cover" />
+                  )}
                 </div>
+              </div>
 
-                {/* Disclaimer */}
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.2 }}
-                  className="p-4 bg-pink-500/10 border border-pink-500/20 rounded-2xl"
-                >
-                  <p className="text-sm text-pink-200 text-center">
-                    ✨ This tool shows realistic improvements through styling, grooming, and presentation - not bone structure changes.
-                  </p>
-                </motion.div>
+              <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
+                <h2 className="text-xl font-bold text-white mb-6">Customize Your Preview</h2>
 
-                <motion.button
-                  onClick={handleContinue}
-                  disabled={!photo}
-                  whileHover={{ scale: 1.02, boxShadow: '0 0 50px rgba(236, 72, 153, 0.4)' }}
-                  whileTap={{ scale: 0.98 }}
-                  className="w-full flex items-center justify-center gap-3 px-8 py-5 bg-gradient-to-r from-pink-600 to-violet-600 text-white text-lg font-semibold rounded-2xl shadow-xl shadow-pink-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  <Sparkles className="w-6 h-6" />
-                  Continue
-                  <ArrowRight className="w-6 h-6" />
-                </motion.button>
-              </motion.div>
-            )}
+                {/* Enhancement Level */}
+                <LevelSelector value={options.level} onChange={(v) => setOptions({ ...options, level: v })} />
 
-            {/* Customize State */}
-            {pageState === 'customize' && (
-              <motion.div
-                key="customize"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-6"
-              >
-                {/* Preview */}
-                <div className="flex justify-center mb-6">
-                  <div className="relative w-48 h-48 rounded-2xl overflow-hidden border-2 border-pink-500/30">
-                    {photo && (
-                      <img
-                        src={photo}
-                        alt="Your photo"
-                        className="w-full h-full object-cover"
-                      />
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-pink-500/20 to-transparent" />
-                  </div>
-                </div>
+                {/* Hairstyle */}
+                <HairstyleSelector
+                  value={options.hairstyle}
+                  onChange={(v) => setOptions({ ...options, hairstyle: v })}
+                  recommendedChips={recommendedChips.hairstyleChips}
+                />
 
-                {/* Settings Card */}
-                <div className="p-6 bg-zinc-900/50 border border-pink-500/20 rounded-3xl">
-                  <h2 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
-                    <Sliders className="w-5 h-5 text-pink-400" />
-                    Customization Options
-                  </h2>
+                {/* Glasses */}
+                <GlassesSelector
+                  value={options.glasses}
+                  onChange={(v) => setOptions({ ...options, glasses: v })}
+                  recommendedChips={recommendedChips.glassesChips}
+                />
 
-                  <OptionSelector
-                    label="Hairstyle"
-                    options={hairstyleOptions}
-                    value={settings.hairstyle}
-                    onChange={(v) => setSettings({ ...settings, hairstyle: v as typeof settings.hairstyle })}
-                    icon={Scissors}
-                  />
-
-                  <OptionSelector
-                    label="Glasses"
-                    options={glassesOptions}
-                    value={settings.glasses}
-                    onChange={(v) => setSettings({ ...settings, glasses: v as typeof settings.glasses })}
-                    icon={GlassWater}
-                  />
-
-                  <EnhancementSlider
-                    value={settings.enhancement}
-                    onChange={(v) => setSettings({ ...settings, enhancement: v })}
-                  />
-                </div>
-
-                {/* Buttons */}
-                <div className="flex gap-4">
-                  <motion.button
-                    onClick={() => setPageState('upload')}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex items-center justify-center gap-2 px-6 py-4 bg-zinc-800 hover:bg-zinc-700 text-white font-semibold rounded-xl border border-zinc-700 transition-all"
-                  >
-                    <ArrowLeft className="w-5 h-5" />
-                    Back
-                  </motion.button>
-                  <motion.button
-                    onClick={handleGenerate}
-                    whileHover={{ scale: 1.02, boxShadow: '0 0 50px rgba(236, 72, 153, 0.4)' }}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex-1 flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-pink-600 to-violet-600 text-white font-semibold rounded-xl shadow-xl shadow-pink-500/30 transition-all"
-                  >
-                    <Wand2 className="w-5 h-5" />
-                    Generate Best Version
-                  </motion.button>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Generating State */}
-            {pageState === 'generating' && (
-              <motion.div
-                key="generating"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-6"
-              >
-                <div className="relative p-8 bg-zinc-900/50 border border-pink-500/20 rounded-3xl overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-r from-pink-500/5 via-violet-500/5 to-pink-500/5 animate-pulse" />
-                  
-                  <div className="relative flex flex-col items-center text-center">
-                    {/* Spinning loader */}
-                    <div className="relative w-32 h-32 mb-8">
-                      <motion.div
-                        className="absolute inset-0 rounded-full border-4 border-pink-500/20"
-                      />
-                      <motion.div
-                        className="absolute inset-0 rounded-full border-4 border-transparent border-t-pink-500"
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        style={{ filter: 'drop-shadow(0 0 10px rgba(236, 72, 153, 0.5))' }}
-                      />
-                      <motion.div
-                        className="absolute inset-2 rounded-full border-4 border-transparent border-t-violet-500"
-                        animate={{ rotate: -360 }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                        style={{ filter: 'drop-shadow(0 0 10px rgba(139, 92, 246, 0.5))' }}
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Wand2 className="w-10 h-10 text-pink-400 animate-pulse" />
-                      </div>
-                    </div>
-                    
-                    <h3 className="text-2xl font-bold text-white mb-4">
-                      Creating Your Best Version
-                    </h3>
-                    
-                    <div className="w-full max-w-md mb-6">
-                      <div className="h-3 bg-zinc-800 rounded-full overflow-hidden">
-                        <motion.div
-                          className="h-full bg-gradient-to-r from-pink-500 to-violet-500 rounded-full"
-                          initial={{ width: 0 }}
-                          animate={{ width: `${generationProgress}%` }}
-                          transition={{ duration: 0.3 }}
-                          style={{ boxShadow: '0 0 20px rgba(236, 72, 153, 0.5)' }}
-                        />
-                      </div>
-                      <p className="text-sm text-zinc-500 mt-2">
-                        {Math.round(generationProgress)}% complete
-                      </p>
-                    </div>
-
-                    <div className="space-y-3 text-left w-full max-w-sm">
-                      {[
-                        { label: 'Analyzing facial features', threshold: 15 },
-                        { label: 'Calculating optimal styling', threshold: 35 },
-                        { label: 'Generating transformations', threshold: 55 },
-                        { label: 'Applying enhancements', threshold: 75 },
-                        { label: 'Finalizing images', threshold: 92 },
-                      ].map((step, i) => (
-                        <motion.div
-                          key={i}
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.1 }}
-                          className={`flex items-center gap-3 ${generationProgress > step.threshold ? 'text-pink-400' : 'text-zinc-500'}`}
-                        >
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${generationProgress > step.threshold ? 'bg-pink-500/20 text-pink-400' : 'bg-zinc-800'}`}>
-                            {generationProgress > step.threshold ? '✓' : '○'}
-                          </span>
-                          {step.label}
-                        </motion.div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Results State */}
-            {pageState === 'results' && generatedImages.length > 0 && (
-              <motion.div
-                key="results"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="space-y-6"
-              >
-                {/* Before/After */}
-                {photo && (
-                  <BeforeAfterComparison
-                    before={photo}
-                    after={generatedImages[selectedImageIndex]?.imageUrl || photo}
-                  />
-                )}
-
-                {/* Multiple images selection */}
-                {generatedImages.length > 1 && (
-                  <div className="flex justify-center gap-3">
-                    {generatedImages.map((img, i) => (
+                {/* Grooming */}
+                <div className="mb-6">
+                  <label className="text-sm font-medium text-zinc-400 mb-3 block">Grooming</label>
+                  <div className="flex flex-wrap gap-2">
+                    {(['natural', 'cleaned'] as const).map((opt) => (
                       <button
-                        key={i}
-                        onClick={() => setSelectedImageIndex(i)}
-                        className={`w-16 h-16 rounded-xl overflow-hidden border-2 transition-all ${
-                          selectedImageIndex === i 
-                            ? 'border-pink-500 shadow-lg shadow-pink-500/30' 
-                            : 'border-zinc-700 opacity-60 hover:opacity-100'
+                        key={opt}
+                        onClick={() => setOptions({ ...options, grooming: { ...options.grooming, brows: opt } })}
+                        className={`px-4 py-2 rounded-lg text-sm capitalize ${
+                          options.grooming?.brows === opt
+                            ? 'bg-pink-500 text-white'
+                            : 'bg-zinc-800 text-zinc-400'
                         }`}
                       >
-                        <img src={img.imageUrl} alt={`Option ${i + 1}`} className="w-full h-full object-cover" />
+                        {opt === 'natural' ? 'Natural brows' : 'Tidied brows'}
                       </button>
                     ))}
                   </div>
-                )}
-
-                {/* Description */}
-                {generatedImages[selectedImageIndex]?.description && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="p-4 bg-pink-500/10 border border-pink-500/20 rounded-2xl text-center"
-                  >
-                    <p className="text-sm text-pink-200">{generatedImages[selectedImageIndex].description}</p>
-                  </motion.div>
-                )}
-
-                {/* Disclaimer */}
-                <div className="p-4 bg-zinc-800/50 border border-zinc-700 rounded-2xl">
-                  <p className="text-xs text-zinc-500 text-center">
-                    ⚠️ These images show potential styling improvements. Results are AI-generated visualizations and individual results may vary.
-                  </p>
                 </div>
 
-                {/* Action Buttons */}
+                {/* Identity Disclaimer */}
+                <div className="p-4 bg-zinc-800/50 rounded-xl mb-6 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-pink-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-zinc-400">
+                    <strong className="text-white">Identity-preserving:</strong> This preview will NOT change
+                    bone structure, jaw, nose, or eye shape. Only modifiable factors like hair, grooming,
+                    glasses, and lighting.
+                  </div>
+                </div>
+
+                {/* Generate Button */}
                 <div className="flex gap-4">
-                  <motion.button
-                    onClick={handleReset}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex-1 flex items-center justify-center gap-2 px-6 py-4 bg-zinc-800 hover:bg-zinc-700 text-white font-semibold rounded-xl border border-zinc-700 transition-all"
+                  <button
+                    onClick={() => setPageState('upload')}
+                    className="px-6 py-3 bg-zinc-800 text-white rounded-xl flex items-center gap-2 hover:bg-zinc-700"
                   >
-                    <RefreshCw className="w-5 h-5" />
-                    Try Again
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.02, boxShadow: '0 0 30px rgba(236, 72, 153, 0.3)' }}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex-1 flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-pink-600 to-violet-600 text-white font-semibold rounded-xl shadow-lg shadow-pink-500/20 transition-all"
+                    <ArrowLeft className="w-4 h-4" />
+                    Back
+                  </button>
+                  <button
+                    onClick={handleGenerate}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-pink-500 to-violet-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:opacity-90"
                   >
-                    <Download className="w-5 h-5" />
-                    Save Image
-                  </motion.button>
+                    Generate Preview
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Generating State */}
+          {pageState === 'generating' && (
+            <motion.div
+              key="generating"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center justify-center py-20"
+            >
+              <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 rounded-full border-4 border-pink-500/20" />
+                <div className="absolute inset-0 rounded-full border-4 border-t-pink-500 animate-spin" />
+                <Sparkles className="absolute inset-0 m-auto w-10 h-10 text-pink-400" />
+              </div>
+              <h3 className="text-xl font-semibold text-white mb-2">Generating Your Best Version</h3>
+              <p className="text-zinc-400 text-sm">Preserving your identity while applying improvements...</p>
+            </motion.div>
+          )}
+
+          {/* Results State */}
+          {pageState === 'results' && result && (
+            <motion.div
+              key="results"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-6"
+            >
+              {/* Before/After Comparison */}
+              <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
+                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-pink-400" />
+                  Your Best Version Preview
+                </h2>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="text-center">
+                    <div className="text-sm text-zinc-500 mb-2">Current</div>
+                    <div className="aspect-square rounded-xl overflow-hidden border border-zinc-700">
+                      {photoPreview && (
+                        <img src={photoPreview} alt="Current" className="w-full h-full object-cover" />
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-sm text-pink-400 mb-2">Best Version</div>
+                    <div className="aspect-square rounded-xl overflow-hidden border border-pink-500/30 bg-zinc-800">
+                      {result.images[0]?.url ? (
+                        <img
+                          src={result.images[0].url}
+                          alt="Best Version"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-zinc-500">
+                          <ImagePlus className="w-12 h-12" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reachability */}
+                <ReachabilityCard reachability={result.reachability} />
+              </div>
+
+              {/* What Changed */}
+              <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
+                <h3 className="font-semibold text-white mb-4">What Changed (Modifiable Only)</h3>
+                <ul className="space-y-2">
+                  {result.appliedChanges.map((change, i) => (
+                    <li key={i} className="flex items-center gap-2 text-sm text-zinc-400">
+                      <Check className="w-4 h-4 text-green-400" />
+                      {change}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Disclaimers */}
+              <div className="p-4 bg-zinc-800/30 rounded-xl">
+                <ul className="space-y-1">
+                  {result.disclaimers.map((disclaimer, i) => (
+                    <li key={i} className="flex items-start gap-2 text-xs text-zinc-500">
+                      <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                      {disclaimer}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setPageState('customize')}
+                  className="px-6 py-3 bg-zinc-800 text-white rounded-xl flex items-center gap-2 hover:bg-zinc-700"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Adjust Settings
+                </button>
+                <button
+                  onClick={handleReset}
+                  className="px-6 py-3 bg-zinc-800 text-white rounded-xl flex items-center gap-2 hover:bg-zinc-700"
+                >
+                  <ImagePlus className="w-4 h-4" />
+                  New Photo
+                </button>
+                {result.images[0]?.url && (
+                  <a
+                    href={result.images[0].url}
+                    download="best-version.png"
+                    className="px-6 py-3 bg-pink-500 text-white rounded-xl flex items-center gap-2 hover:bg-pink-600"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </a>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </AppShell>
   );
