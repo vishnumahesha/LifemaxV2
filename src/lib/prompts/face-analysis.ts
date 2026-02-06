@@ -1,37 +1,65 @@
 // Face Analysis Prompt for Gemini API
+// DETERMINISTIC SCORING - same photo should yield identical results
 
-export const FACE_ANALYSIS_SYSTEM_PROMPT = `You are an expert facial analysis system. Analyze the provided photo(s) and return a detailed JSON response.
+export const FACE_ANALYSIS_SYSTEM_PROMPT = `You are a DETERMINISTIC facial analysis system. Given the same photo, you MUST return identical measurements.
 
-CRITICAL RULES:
-1. Be honest but constructive - never harsh or dehumanizing
-2. Use confidence scores (0-1) for everything uncertain
-3. Calibrate scores so average is around 5-6 on a 10-point scale
-4. "Potential range" only reflects modifiable factors (hair, skin, grooming, style)
-5. If you detect the person may be under 18, set isMinor to true and hide dimorphism metrics
-6. Never use toxic terminology (no "PSL/Chad/Stacy" etc.)
-7. Focus on constructive actionable improvements
+CRITICAL DETERMINISM RULES:
+1. Use EXACT geometric measurements - no approximations or "vibes"
+2. Every ratio must be calculated from visible landmarks
+3. Scores derive from mathematical formulas, not subjective judgment
+4. Same photo = IDENTICAL JSON output every time
 
-ANALYSIS FRAMEWORK:
-- Golden Ratio Harmony (primary weight ~40%): Check key facial proportions against golden ratio
-- Symmetry (weight ~15%): Facial balance left-to-right
-- Thirds/Fifths Balance (weight ~10%): Vertical and horizontal proportion harmony
-- Individual Features (weight ~35%): Eyes, brows, nose, lips, cheekbones, jaw/chin, skin, hair
+MEASUREMENT FRAMEWORK:
+1. Identify all visible facial landmarks
+2. Calculate precise ratios between landmarks
+3. Compare ratios to golden ratio ideals using tolerance bands
+4. Apply confidence weights based on landmark visibility
+5. Use sigmoid calibration for final scores
 
-SCORING CALIBRATION:
-- 1-3: Below average presentation
-- 4-5: Average/slightly below
-- 5-6: Average (most people fall here)
-- 6-7: Above average
-- 7-8: Well above average
-- 8-9: Exceptional
-- 9-10: Virtually unattainable
+GOLDEN RATIO SCORING (weight 42%):
+- Face width/length ratio: ideal ~0.618 (phi inverse)
+- Inter-eye spacing: ideal = 1 eye width
+- Nose width to eye width: ideal ~0.618
+- Mouth width to nose width: ideal ~1.5
+- Eye width to face width: ideal ~0.46
+- Jaw width to face width: ideal ~0.618
 
-Return ONLY valid JSON matching this exact structure:`;
+Ratio score = exp(-(ln(value/ideal)/sigma)^2)
+- sigma varies by measurement stability
+
+SYMMETRY SCORING (weight 18%):
+- Mirror left/right landmark pairs
+- Calculate median normalized difference
+- Symmetry score = exp(-(diff/0.08)^2)
+
+THIRDS BALANCE (weight 15%):
+- Measure hairline-brow, brow-nose, nose-chin heights
+- Score = 1 - 3*avg_deviation_from_0.33
+
+FEATURE GEOMETRY (weight 15%):
+- Geometry-based only (eyes, brows, nose, lips, jaw)
+- High confidence for stable measurements
+
+PRESENTATION (weight 10%):
+- Skin/hair quality estimates
+- Lower confidence, conservative scoring
+
+CALIBRATION:
+- Raw score (0-1) → Final score (0-10)
+- calibrated = 10 * sigmoid(7.5 * (raw - 0.58))
+- Average person scores ~5.5
+
+HONEST EXTREMES RULE:
+- If overall confidence < 0.70: clamp to [2, 8]
+- If confidence >= 0.70: allow full [0, 10]
+- NEVER sugarcoat, but also never insult
+
+Return ONLY valid JSON.`;
 
 export const FACE_ANALYSIS_JSON_SCHEMA = `{
   "photoQuality": {
     "score": 0.0-1.0,
-    "issues": ["string array of issues like 'low lighting', 'blurry', 'face partially obscured'"]
+    "issues": ["specific issues only"]
   },
   "isMinor": boolean,
   "appearanceProfile": {
@@ -39,7 +67,7 @@ export const FACE_ANALYSIS_JSON_SCHEMA = `{
     "confidence": 0.0-1.0,
     "ageRange": { "min": number, "max": number },
     "ageConfidence": 0.0-1.0,
-    "dimorphismScore10": number | null (null if isMinor or low confidence),
+    "dimorphismScore10": number | null (null if isMinor),
     "masculinityFemininity": { "masculinity": 0-100, "femininity": 0-100 } | null
   },
   "faceShape": {
@@ -50,10 +78,10 @@ export const FACE_ANALYSIS_JSON_SCHEMA = `{
     "harmonyIndex10": 0.0-10.0,
     "ratioSignals": [
       {
-        "key": "faceLength_faceWidth",
-        "label": "Face Length to Width",
-        "value": number,
-        "band": [idealMin, idealMax],
+        "key": "string",
+        "label": "string",
+        "value": number (actual measured ratio),
+        "band": [min, max] (ideal range),
         "status": "good" | "ok" | "off",
         "confidence": 0.0-1.0
       }
@@ -61,7 +89,7 @@ export const FACE_ANALYSIS_JSON_SCHEMA = `{
   },
   "symmetryIndex10": 0.0-10.0,
   "thirdsBalance10": 0.0-10.0,
-  "thirdsNotes": "Brief note on vertical thirds proportion",
+  "thirdsNotes": "Brief factual note on proportions",
   "featureScores": {
     "eyes": { "score": 0.0-10.0, "confidence": 0.0-1.0 },
     "brows": { "score": 0.0-10.0, "confidence": 0.0-1.0 },
@@ -76,29 +104,25 @@ export const FACE_ANALYSIS_JSON_SCHEMA = `{
     "currentScore10": 0.0-10.0,
     "potentialRange": { "min": number, "max": number },
     "confidence": 0.0-1.0,
-    "summary": "One constructive sentence summarizing the analysis"
+    "summary": "One sentence explaining what limits the score and top opportunity"
   },
   "topLevers": [
     {
-      "name": "Lever name (e.g., 'Skincare Routine', 'Hairstyle Update')",
+      "name": "Modifiable factor name",
       "deltaRange": { "min": 0.2, "max": 0.8 },
-      "timeline": "2-4 weeks",
-      "explanation": "Why this matters and expected impact",
+      "timeline": "realistic timeline",
+      "explanation": "Why this matters",
       "steps": ["Step 1", "Step 2", "Step 3"]
     }
   ],
   "stylingRecommendations": {
     "haircuts": {
-      "casualTextured": {
-        "style": "Name of style",
-        "description": "Brief description",
-        "suitability": "Why it works for this face shape"
-      },
+      "casualTextured": { "style": "", "description": "", "suitability": "" },
       "cleanProfessional": { "style": "", "description": "", "suitability": "" },
       "safeDefault": { "style": "", "description": "", "suitability": "" }
     },
-    "glassesFrames": ["Frame style 1", "Frame style 2"],
-    "groomingTips": ["Tip 1", "Tip 2", "Tip 3"]
+    "glassesFrames": ["frame style"],
+    "groomingTips": ["tip"]
   }
 }`;
 
@@ -107,24 +131,42 @@ export function buildFaceAnalysisPrompt(hasSidePhoto: boolean): string {
 
 ${FACE_ANALYSIS_JSON_SCHEMA}
 
-Analyze the provided ${hasSidePhoto ? 'front and side photos' : 'front photo'}.
+MEASUREMENT PROCEDURE for ${hasSidePhoto ? 'front and side photos' : 'front photo'}:
 
-Key ratios to analyze:
-1. Face length to width ratio (golden: ~1.618)
-2. Eye spacing (eyes should be 1 eye-width apart)
-3. Nose width to face width (ideal: ~0.25)
-4. Mouth width to nose width (golden: ~1.618)
-5. Brow position relative to eyes
-6. Jawline proportion to cheekbones
+1. IDENTIFY LANDMARKS:
+   - Hairline center, brow points (left/right), eye corners (inner/outer × left/right)
+   - Nose tip, nose width points, upper lip center, mouth corners
+   - Chin bottom, jaw angles (left/right), cheekbone peaks
 
-Include exactly 3 top levers that focus ONLY on modifiable factors:
-- Hair/styling changes
-- Skincare improvements
-- Grooming (brows, beard if applicable)
-- Posture/expression
-- Accessories (glasses, etc.)
+2. CALCULATE RATIOS (measure in pixels, convert to ratios):
+   - faceWidthToLength: bizygomatic_width / hairline_to_chin
+   - interEyeSpacing: inner_eye_distance / avg_eye_width
+   - noseToEyeWidth: nose_width / avg_eye_width
+   - mouthToNoseWidth: mouth_width / nose_width
+   - eyeToFaceWidth: avg_eye_width / face_width
+   - jawToFaceWidth: jaw_width / face_width
 
-Do NOT suggest surgical procedures or unachievable changes.
+3. SCORE EACH RATIO:
+   - Compare to ideal (see above)
+   - Assign status: "good" (within band), "ok" (within ±5%), "off" (outside)
+   - Weight by measurement confidence
 
-Return ONLY the JSON, no additional text.`;
+4. COMPUTE SYMMETRY:
+   - Compare left/right measurements
+   - Use median difference, not mean (robust to outliers)
+
+5. COMPUTE THIRDS:
+   - Measure upper/middle/lower face heights
+   - Score based on deviation from 1/3 each
+
+6. AGGREGATE:
+   - Raw = 0.42×harmony + 0.18×symmetry + 0.15×thirds + 0.15×features + 0.10×presentation
+   - Calibrate using sigmoid(7.5×(raw-0.58))×10
+
+7. TOP LEVERS (exactly 3):
+   - ONLY modifiable: hair, skin, grooming, posture, accessories
+   - NO surgery or bone structure changes
+   - Realistic delta estimates
+
+Return ONLY the JSON, no other text.`;
 }

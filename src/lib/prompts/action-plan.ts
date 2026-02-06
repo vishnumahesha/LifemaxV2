@@ -1,4 +1,5 @@
 // Action Plan Generation Prompt for Gemini API
+// Returns deterministic workout + nutrition plan
 
 export const ACTION_PLAN_SYSTEM_PROMPT = `You are an expert fitness and nutrition coach. Generate a personalized workout plan and nutrition targets based on user stats and goals.
 
@@ -54,34 +55,42 @@ ${targetAreas?.length ? `FOCUS AREAS:\n${targetAreas.map(a => `- ${a}`).join('\n
 
 Generate a JSON response with this EXACT structure:
 {
-  "nutritionTargets": {
-    "dailyCalories": number,
-    "proteinGrams": number,
-    "carbGrams": number,
-    "fatGrams": number,
-    "notes": "Brief explanation of macro split"
+  "nutrition": {
+    "calories": number (daily target),
+    "protein": number (grams),
+    "carbs": number (grams),
+    "fats": number (grams),
+    "fiber": number (grams, typically 25-35)
   },
-  "workoutPlan": {
+  "workout": {
     "split": "Push/Pull/Legs" | "Upper/Lower" | "Full Body",
-    "daysPerWeek": 3-6,
-    "exercises": [
+    "daysPerWeek": number (3-6),
+    "emphasis": ["area1", "area2"] (focus areas),
+    "days": [
       {
-        "name": "Exercise name",
-        "sets": 3,
-        "reps": "8-12",
-        "notes": "optional form tip"
+        "name": "Day 1 - Push",
+        "focus": "Chest, Shoulders, Triceps",
+        "exercises": [
+          {
+            "name": "Exercise name",
+            "sets": 3,
+            "reps": "8-12",
+            "notes": "optional form tip"
+          }
+        ]
       }
     ],
-    "notes": "Brief training guidance"
+    "notes": ["tip1", "tip2"] (training guidance)
   },
-  "summary": "2-3 sentence overview of the plan"
+  "priorityAreas": ["area1", "area2", "area3"],
+  "timeline": "Expected timeline for visible results (e.g., '8-12 weeks')"
 }
 
 WORKOUT GUIDELINES:
-- Include 6-8 exercises total
+- Include 3-5 workout days with 4-6 exercises each
 - Focus on compound movements
 - Mix in targeted exercises for focus areas
-- Include both upper and lower body
+- Include both upper and lower body balance
 
 NUTRITION GUIDELINES:
 - Base calories on goal (deficit for fat loss, surplus for muscle)

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTextModel, extractJSON } from '@/lib/gemini';
 import { success, error, ErrorCodes } from '@/types/api';
-import type { ActionPlan } from '@/types/database';
+import type { ActionPlan, MacroTargets, WorkoutPlan, WorkoutDay, Exercise } from '@/types/body';
 import { buildActionPlanPrompt } from '@/lib/prompts/action-plan';
 import { z } from 'zod';
 
@@ -17,6 +17,35 @@ const requestSchema = z.object({
 });
 
 export const maxDuration = 60;
+
+// Response shape from AI
+interface AIActionPlanResponse {
+  nutrition: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fats: number;
+    fiber: number;
+  };
+  workout: {
+    split: string;
+    daysPerWeek: number;
+    emphasis: string[];
+    days: Array<{
+      name: string;
+      focus: string;
+      exercises: Array<{
+        name: string;
+        sets: number;
+        reps: string;
+        notes?: string;
+      }>;
+    }>;
+    notes: string[];
+  };
+  priorityAreas: string[];
+  timeline: string;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -90,16 +119,41 @@ export async function POST(request: NextRequest) {
 
     let planData: ActionPlan;
     try {
-      const rawData = extractJSON<Record<string, unknown>>(text);
+      const rawData = extractJSON<AIActionPlanResponse>(text);
       
-      // Map the response to our ActionPlan format
+      // Map to ActionPlan type
+      const nutrition: MacroTargets = {
+        calories: rawData.nutrition?.calories ?? 2000,
+        protein: rawData.nutrition?.protein ?? 150,
+        carbs: rawData.nutrition?.carbs ?? 200,
+        fats: rawData.nutrition?.fats ?? 65,
+        fiber: rawData.nutrition?.fiber ?? 30,
+      };
+
+      const days: WorkoutDay[] = (rawData.workout?.days ?? []).map(day => ({
+        name: day.name ?? 'Workout Day',
+        focus: day.focus ?? 'Full Body',
+        exercises: (day.exercises ?? []).map((ex): Exercise => ({
+          name: ex.name ?? 'Exercise',
+          sets: ex.sets ?? 3,
+          reps: ex.reps ?? '8-12',
+          notes: ex.notes,
+        })),
+      }));
+
+      const workout: WorkoutPlan = {
+        split: rawData.workout?.split ?? 'Full Body',
+        daysPerWeek: rawData.workout?.daysPerWeek ?? 3,
+        emphasis: rawData.workout?.emphasis ?? [],
+        days,
+        notes: rawData.workout?.notes ?? [],
+      };
+
       planData = {
-        id: '',
-        userId: '',
-        workoutPlan: rawData.workoutPlan as ActionPlan['workoutPlan'],
-        nutritionTargets: rawData.nutritionTargets as ActionPlan['nutritionTargets'],
-        summary: rawData.summary as string,
-        createdAt: new Date().toISOString(),
+        nutrition,
+        workout,
+        priorityAreas: rawData.priorityAreas ?? targetAreas ?? [],
+        timeline: rawData.timeline ?? '8-12 weeks',
       };
     } catch (parseError) {
       console.error('Failed to parse action plan:', parseError);

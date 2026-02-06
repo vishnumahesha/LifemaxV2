@@ -4,8 +4,18 @@ import { faceScanRequestSchema, faceAnalysisResultSchema } from '@/lib/validatio
 import { success, error, ErrorCodes } from '@/types/api';
 import type { FaceAnalysisResult } from '@/types/face';
 import { buildFaceAnalysisPrompt } from '@/lib/prompts/face-analysis';
+import {
+  computeImageHash,
+  getSeedFromHash,
+  getCachedResult,
+  setCachedResult,
+  CONFIDENCE_THRESHOLDS,
+} from '@/lib/scoring';
 
-export const maxDuration = 60; // Allow up to 60 seconds for AI processing
+export const maxDuration = 60;
+
+// Endpoint version - bump when output format changes
+const ENDPOINT_VERSION = '2.0.0';
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,7 +36,18 @@ export async function POST(request: NextRequest) {
 
     const { frontPhotoBase64, sidePhotoBase64 } = validation.data;
 
-    // Check if Gemini API key is configured
+    // Compute image hash for caching and determinism
+    const imageHash = computeImageHash(frontPhotoBase64);
+    const _seed = getSeedFromHash(imageHash); // For deterministic operations
+
+    // Check cache first
+    const cachedResult = getCachedResult<FaceAnalysisResult>(imageHash, ENDPOINT_VERSION);
+    if (cachedResult) {
+      console.log('Returning cached result for hash:', imageHash.slice(0, 8));
+      return NextResponse.json(success(cachedResult));
+    }
+
+    // Check API key
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json(
         error(
@@ -38,8 +59,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('Starting face analysis...');
-    console.log('API Key present:', !!process.env.GEMINI_API_KEY);
-    console.log('Front photo size:', frontPhotoBase64.length);
+    console.log('Image hash:', imageHash.slice(0, 8));
 
     // Build prompt
     const prompt = buildFaceAnalysisPrompt(!!sidePhotoBase64);
@@ -53,8 +73,8 @@ export async function POST(request: NextRequest) {
       imageParts.push(base64ToGenerativePart(sidePhotoBase64, 'image/jpeg'));
     }
 
-    // Call Gemini API
-    console.log('Calling Gemini API...');
+    // Call Gemini API with temperature=0 for determinism
+    console.log('Calling Gemini API (temperature=0)...');
     const model = getVisionModel();
     
     let result;
@@ -64,7 +84,6 @@ export async function POST(request: NextRequest) {
       console.error('Gemini API call failed:', apiError);
       const errorMessage = apiError instanceof Error ? apiError.message : 'Unknown error';
       
-      // Check for specific error types
       if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('invalid')) {
         return NextResponse.json(
           error(
@@ -113,10 +132,8 @@ export async function POST(request: NextRequest) {
     try {
       const rawData = extractJSON<FaceAnalysisResult & { isMinor?: boolean }>(text);
       
-      // Remove isMinor from the response (we handle it internally)
+      // Handle minor detection
       const isMinor = rawData.isMinor;
-      
-      // If minor detected, sanitize the response
       if (isMinor) {
         if (rawData.appearanceProfile) {
           rawData.appearanceProfile.dimorphismScore10 = undefined;
@@ -124,13 +141,14 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      // Validate with zod
-      const validated = faceAnalysisResultSchema.safeParse(rawData);
+      // Post-process for determinism and calibration
+      analysisData = postProcessFaceResult(rawData);
       
+      // Validate with zod
+      const validated = faceAnalysisResultSchema.safeParse(analysisData);
       if (!validated.success) {
-        console.error('Validation errors:', validated.error.flatten());
-        // Try to use the raw data anyway with some defaults
-        analysisData = rawData;
+        console.warn('Validation warnings:', validated.error.flatten());
+        // Continue with processed data
       } else {
         analysisData = validated.data;
       }
@@ -146,7 +164,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check photo quality
+    // Strict quality rejection
     if (analysisData.photoQuality.score < 0.3) {
       return NextResponse.json(
         error(
@@ -158,26 +176,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // If photo quality is marginal, add warning to response
+    // Apply confidence gating for marginal quality
     if (analysisData.photoQuality.score < 0.6) {
-      // Widen confidence intervals and reduce confidence scores
-      analysisData.overall.confidence = Math.min(analysisData.overall.confidence, 0.6);
-      analysisData.overall.potentialRange.min = Math.max(
-        analysisData.overall.currentScore10 - 1.5,
-        1
-      );
-      analysisData.overall.potentialRange.max = Math.min(
-        analysisData.overall.currentScore10 + 2,
-        10
-      );
+      analysisData = applyConfidenceGating(analysisData);
     }
+
+    // Cache the result
+    setCachedResult(imageHash, ENDPOINT_VERSION, analysisData);
 
     console.log('Analysis complete!');
     return NextResponse.json(success(analysisData));
 
   } catch (err) {
     console.error('Face scan error:', err);
-    
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
     
     return NextResponse.json(
@@ -188,4 +199,112 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * Post-process face analysis for determinism and calibration
+ */
+function postProcessFaceResult(
+  raw: FaceAnalysisResult & { isMinor?: boolean }
+): FaceAnalysisResult {
+  // Round all scores to 1 decimal place for consistency
+  const roundScore = (v: number) => Math.round(v * 10) / 10;
+  const roundConfidence = (v: number) => Math.round(v * 100) / 100;
+  
+  // Process feature scores
+  const featureScores = { ...raw.featureScores };
+  for (const key of Object.keys(featureScores) as (keyof typeof featureScores)[]) {
+    if (featureScores[key]) {
+      featureScores[key] = {
+        score: roundScore(featureScores[key].score),
+        confidence: roundConfidence(featureScores[key].confidence),
+      };
+    }
+  }
+  
+  // Process golden ratio signals
+  const ratioSignals = raw.goldenRatioHarmony.ratioSignals.map(signal => ({
+    ...signal,
+    value: Math.round(signal.value * 1000) / 1000,
+    confidence: roundConfidence(signal.confidence),
+  }));
+  
+  // Calculate calibrated overall score
+  const overallConfidence = roundConfidence(raw.overall.confidence);
+  let currentScore = roundScore(raw.overall.currentScore10);
+  
+  // Apply honest extremes rule
+  if (overallConfidence < CONFIDENCE_THRESHOLDS.allowExtremes) {
+    currentScore = Math.max(2, Math.min(8, currentScore));
+  }
+  
+  // Calculate potential range (modifiable factors only)
+  const skinScore = featureScores.skin?.score ?? 5;
+  const hairScore = featureScores.hair?.score ?? 5;
+  const skinRoom = Math.max(0, (10 - skinScore) * 0.15);
+  const hairRoom = Math.max(0, (10 - hairScore) * 0.1);
+  let maxPotential = Math.min(currentScore + skinRoom + hairRoom + 0.3, currentScore + 1.5, 9.5);
+  
+  // Widen range if confidence is low
+  if (overallConfidence < 0.6) {
+    maxPotential = Math.min(maxPotential + 0.3, 9.5);
+  }
+  
+  return {
+    ...raw,
+    goldenRatioHarmony: {
+      harmonyIndex10: roundScore(raw.goldenRatioHarmony.harmonyIndex10),
+      ratioSignals: ratioSignals.slice(0, 6),
+    },
+    symmetryIndex10: roundScore(raw.symmetryIndex10),
+    thirdsBalance10: roundScore(raw.thirdsBalance10),
+    featureScores,
+    overall: {
+      currentScore10: currentScore,
+      potentialRange: {
+        min: roundScore(Math.max(currentScore, raw.overall.potentialRange?.min ?? currentScore)),
+        max: roundScore(maxPotential),
+      },
+      confidence: overallConfidence,
+      summary: raw.overall.summary,
+    },
+    topLevers: raw.topLevers.slice(0, 3) as [typeof raw.topLevers[0], typeof raw.topLevers[0], typeof raw.topLevers[0]],
+  };
+}
+
+/**
+ * Apply confidence gating for marginal quality photos
+ */
+function applyConfidenceGating(data: FaceAnalysisResult): FaceAnalysisResult {
+  // Reduce confidence
+  const gatedConfidence = Math.min(data.overall.confidence, 0.6);
+  
+  // Widen potential range
+  const currentScore = data.overall.currentScore10;
+  const potentialMin = Math.max(currentScore - 0.5, 1);
+  const potentialMax = Math.min(currentScore + 2, 10);
+  
+  // Reduce feature score confidence
+  const gatedFeatures = { ...data.featureScores };
+  for (const key of Object.keys(gatedFeatures) as (keyof typeof gatedFeatures)[]) {
+    if (gatedFeatures[key]) {
+      gatedFeatures[key] = {
+        ...gatedFeatures[key],
+        confidence: Math.min(gatedFeatures[key].confidence, 0.5),
+      };
+    }
+  }
+  
+  return {
+    ...data,
+    featureScores: gatedFeatures,
+    overall: {
+      ...data.overall,
+      confidence: gatedConfidence,
+      potentialRange: {
+        min: Math.round(potentialMin * 10) / 10,
+        max: Math.round(potentialMax * 10) / 10,
+      },
+    },
+  };
 }

@@ -30,14 +30,15 @@ const safetySettings = [
 ];
 
 // Model for analysis (vision + text) - Using gemini-2.0-flash which supports images
+// DETERMINISM: temperature=0 ensures same input = same output
 export function getVisionModel() {
   return genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
     safetySettings,
     generationConfig: {
-      temperature: 0.3, // Lower for more consistent analysis
-      topP: 0.8,
-      topK: 40,
+      temperature: 0, // DETERMINISTIC: same photo = same result
+      topP: 1,        // Disable nucleus sampling for determinism
+      topK: 1,        // Only pick top token for determinism
       maxOutputTokens: 8192,
     },
   });

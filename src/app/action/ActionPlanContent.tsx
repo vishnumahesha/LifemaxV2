@@ -23,7 +23,7 @@ import {
 import { AppShell } from '@/components/AppShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/Accordion';
-import type { ActionPlan, WorkoutPlan, NutritionTargets } from '@/types/database';
+import type { ActionPlan, WorkoutPlan, MacroTargets } from '@/types/body';
 import type { ApiResult } from '@/types/api';
 
 type PageState = 'input' | 'generating' | 'results';
@@ -582,37 +582,37 @@ export default function ActionPlanContent() {
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <MacroCard
                       label="Calories"
-                      value={plan.nutritionTargets?.dailyCalories || 2400}
+                      value={plan.nutrition?.calories || 2400}
                       unit="kcal"
                       color="orange"
                       icon={Flame}
                     />
                     <MacroCard
                       label="Protein"
-                      value={plan.nutritionTargets?.proteinGrams || 180}
+                      value={plan.nutrition?.protein || 180}
                       unit="g"
                       color="blue"
                       icon={Dumbbell}
                     />
                     <MacroCard
                       label="Carbs"
-                      value={plan.nutritionTargets?.carbGrams || 240}
+                      value={plan.nutrition?.carbs || 240}
                       unit="g"
                       color="green"
                       icon={Zap}
                     />
                     <MacroCard
                       label="Fat"
-                      value={plan.nutritionTargets?.fatGrams || 80}
+                      value={plan.nutrition?.fats || 80}
                       unit="g"
                       color="purple"
                       icon={Droplets}
                     />
                   </div>
 
-                  {plan.nutritionTargets?.notes && (
+                  {plan.nutrition?.fiber && (
                     <div className="mt-4 p-4 bg-zinc-800/50 rounded-xl">
-                      <p className="text-sm text-zinc-400">{plan.nutritionTargets.notes}</p>
+                      <p className="text-sm text-zinc-400">Daily fiber target: {plan.nutrition.fiber}g</p>
                     </div>
                   )}
                 </motion.div>
@@ -631,21 +631,28 @@ export default function ActionPlanContent() {
                     </h2>
                     <span className="px-3 py-1 bg-zinc-800 text-zinc-400 text-sm rounded-full flex items-center gap-1">
                       <Calendar className="w-4 h-4" />
-                      {plan.workoutPlan?.daysPerWeek || 4}x/week
+                      {plan.workout?.daysPerWeek || 4}x/week
                     </span>
                   </div>
 
-                  {plan.workoutPlan?.exercises ? (
-                    <div className="space-y-3">
-                      {plan.workoutPlan.exercises.map((exercise, index) => (
-                        <ExerciseCard
-                          key={index}
-                          name={exercise.name}
-                          sets={exercise.sets}
-                          reps={exercise.reps}
-                          notes={exercise.notes}
-                          index={index}
-                        />
+                  {plan.workout?.days && plan.workout.days.length > 0 ? (
+                    <div className="space-y-4">
+                      {plan.workout.days.map((day, dayIndex) => (
+                        <div key={dayIndex} className="p-4 bg-zinc-800/50 rounded-xl">
+                          <h3 className="font-semibold text-white mb-3">{day.name} - {day.focus}</h3>
+                          <div className="space-y-2">
+                            {day.exercises.map((exercise, index) => (
+                              <ExerciseCard
+                                key={index}
+                                name={exercise.name}
+                                sets={exercise.sets}
+                                reps={exercise.reps}
+                                notes={exercise.notes}
+                                index={index}
+                              />
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -655,15 +662,17 @@ export default function ActionPlanContent() {
                     </div>
                   )}
 
-                  {plan.workoutPlan?.notes && (
-                    <div className="mt-4 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl">
-                      <p className="text-sm text-orange-200">{plan.workoutPlan.notes}</p>
+                  {plan.workout?.notes && plan.workout.notes.length > 0 && (
+                    <div className="mt-4 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl space-y-1">
+                      {plan.workout.notes.map((note, i) => (
+                        <p key={i} className="text-sm text-orange-200">{note}</p>
+                      ))}
                     </div>
                   )}
                 </motion.div>
 
-                {/* Summary */}
-                {plan.summary && (
+                {/* Priority Areas & Timeline */}
+                {(plan.priorityAreas?.length > 0 || plan.timeline) && (
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -672,9 +681,20 @@ export default function ActionPlanContent() {
                   >
                     <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
                       <Target className="w-5 h-5 text-orange-400" />
-                      Plan Summary
+                      Plan Focus
                     </h3>
-                    <p className="text-zinc-400 leading-relaxed">{plan.summary}</p>
+                    {plan.priorityAreas && plan.priorityAreas.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {plan.priorityAreas.map((area, i) => (
+                          <span key={i} className="px-3 py-1 bg-orange-500/20 text-orange-300 rounded-full text-sm">
+                            {area}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {plan.timeline && (
+                      <p className="text-zinc-400 leading-relaxed">Timeline: {plan.timeline}</p>
+                    )}
                   </motion.div>
                 )}
 
