@@ -406,16 +406,31 @@ export default function BestVersionContent() {
     setPageState('generating');
 
     try {
+      // Build request body, omitting undefined/null values
+      const requestBody: Record<string, unknown> = {
+        frontPhotoBase64: photoPreview,
+        options: {
+          level: options.level,
+          hairstyle: options.hairstyle,
+          glasses: options.glasses,
+          grooming: options.grooming,
+          lighting: options.lighting,
+        },
+      };
+
+      // Only include optional fields if they have values
+      if (sidePhotoPreview) {
+        requestBody.sidePhotoBase64 = sidePhotoPreview;
+      }
+      if (faceScanData?.faceShape) {
+        requestBody.faceShape = faceScanData.faceShape;
+        requestBody.faceShapeConfidence = faceScanData.faceShapeConfidence || 0.7;
+      }
+
       const response = await fetch('/api/face/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          frontPhotoBase64: photoPreview,
-          sidePhotoBase64: sidePhotoPreview,
-          faceShape: faceScanData?.faceShape,
-          faceShapeConfidence: faceScanData?.faceShapeConfidence,
-          options,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data: ApiResult<PreviewResult> = await response.json();

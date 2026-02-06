@@ -15,31 +15,31 @@ export const maxDuration = 60;
 
 const ENDPOINT_VERSION = '2.0.0';
 
-// Request schema following spec
+// Request schema following spec - made more lenient for client compatibility
 const requestSchema = z.object({
   frontPhotoBase64: z.string().min(100),
-  sidePhotoBase64: z.string().optional(),
-  faceShape: z.enum(['oval', 'round', 'square', 'heart', 'diamond', 'oblong']).optional(),
-  faceShapeConfidence: z.number().min(0).max(1).optional().default(0.7),
-  photoQuality: z.number().min(0).max(1).optional().default(0.7),
-  currentHairLength: z.enum(['short', 'medium', 'long']).optional().default('short'),
-  isMinor: z.boolean().optional().default(false),
+  sidePhotoBase64: z.string().min(100).optional().nullable(),
+  faceShape: z.enum(['oval', 'round', 'square', 'heart', 'diamond', 'oblong']).optional().nullable(),
+  faceShapeConfidence: z.number().min(0).max(1).optional().nullable(),
+  photoQuality: z.number().min(0).max(1).optional().nullable(),
+  currentHairLength: z.enum(['short', 'medium', 'long']).optional().nullable(),
+  isMinor: z.boolean().optional().nullable(),
   options: z.object({
-    level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    level: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
     hairstyle: z.object({
       length: z.enum(['short', 'medium', 'long']),
       finish: z.enum(['textured', 'clean']),
-    }),
+    }).optional(),
     glasses: z.object({
       enabled: z.boolean(),
-      style: z.enum(['round', 'rectangular', 'browline', 'aviator', 'geometric']).optional(),
-    }),
-    grooming: z.object({
-      facialHair: z.enum(['none', 'stubble', 'trimmed']).optional(),
-      brows: z.enum(['natural', 'cleaned']).optional(),
+      style: z.enum(['round', 'rectangular', 'browline', 'aviator', 'geometric']).optional().nullable(),
     }).optional(),
-    lighting: z.enum(['neutral_soft', 'studio_soft', 'outdoor_shade']).optional(),
-  }),
+    grooming: z.object({
+      facialHair: z.enum(['none', 'stubble', 'trimmed']).optional().nullable(),
+      brows: z.enum(['natural', 'cleaned']).optional().nullable(),
+    }).optional().nullable(),
+    lighting: z.enum(['neutral_soft', 'studio_soft', 'outdoor_shade']).optional().nullable(),
+  }).optional(),
 });
 
 // Response types
@@ -105,11 +105,44 @@ export async function POST(request: NextRequest) {
       options,
     } = validation.data;
 
+    // Normalize null values to undefined or defaults
+    const normalizedFaceShape = faceShape || undefined;
+    const normalizedFaceShapeConfidence = faceShapeConfidence ?? 0.7;
+    const normalizedPhotoQuality = photoQuality ?? 0.7;
+    const normalizedCurrentHairLength = currentHairLength || 'short';
+    const normalizedIsMinor = isMinor ?? false;
+
+    // Provide defaults for options
+    const safeOptions = options || {};
+    const requestedLevel = safeOptions.level || 2;
+
+    // Normalize glasses (convert null style to undefined)
+    const normalizedGlasses = safeOptions.glasses
+      ? {
+          enabled: safeOptions.glasses.enabled,
+          style: safeOptions.glasses.style || undefined,
+        }
+      : { enabled: false };
+
+    // Normalize grooming (convert null values to undefined)
+    const normalizedGrooming = safeOptions.grooming
+      ? {
+          facialHair: safeOptions.grooming.facialHair || undefined,
+          brows: safeOptions.grooming.brows || undefined,
+        }
+      : undefined;
+
+    // Normalize lighting (convert null to undefined)
+    const normalizedLighting = safeOptions.lighting || undefined;
+
     // Enforce minor restrictions
-    const effectiveLevel = isMinor ? 1 : options.level;
+    const effectiveLevel = normalizedIsMinor ? 1 : requestedLevel;
     const effectiveOptions: FacePreviewOptions = {
-      ...options,
       level: effectiveLevel as 1 | 2 | 3,
+      hairstyle: safeOptions.hairstyle || { length: 'short', finish: 'textured' },
+      glasses: normalizedGlasses,
+      grooming: normalizedGrooming,
+      lighting: normalizedLighting,
     };
 
     // Compute hash for caching/determinism
@@ -137,14 +170,14 @@ export async function POST(request: NextRequest) {
     const changeBudget = getChangeBudget(effectiveLevel as 1 | 2 | 3);
 
     // Build identity-preserving prompt
-    const prompt = buildPreviewPrompt(effectiveOptions, changeBudget, isMinor);
+    const prompt = buildPreviewPrompt(effectiveOptions, changeBudget, normalizedIsMinor);
 
     console.log('Generating face preview with seed:', seed);
 
     // Call Gemini
     const model = getImageGenerationModel();
     const imageParts = [base64ToGenerativePart(frontPhotoBase64, 'image/jpeg')];
-    if (sidePhotoBase64) {
+    if (sidePhotoBase64 && sidePhotoBase64.length > 100) {
       imageParts.push(base64ToGenerativePart(sidePhotoBase64, 'image/jpeg'));
     }
 
@@ -205,8 +238,8 @@ export async function POST(request: NextRequest) {
 
     // Get style recommendations
     const styleRecs = getFaceStyleRecommendations(
-      faceShape || 'oval',
-      faceShapeConfidence || 0.7
+      normalizedFaceShape || 'oval',
+      normalizedFaceShapeConfidence
     );
 
     // Build recommendation chips
@@ -228,8 +261,8 @@ export async function POST(request: NextRequest) {
     // Calculate reachability
     const reachability = estimateFaceReachability(
       effectiveOptions,
-      currentHairLength || 'short',
-      photoQuality || 0.7
+      normalizedCurrentHairLength,
+      normalizedPhotoQuality
     );
 
     // Describe what changed
@@ -240,10 +273,10 @@ export async function POST(request: NextRequest) {
       'Identity-preserving preview. Does not change bone structure, jaw, nose, or eye shape.',
       'Estimated timelines are ranges and vary by individual.',
     ];
-    if (isMinor) {
+    if (normalizedIsMinor) {
       disclaimers.push('Minor detected: showing subtle styling improvements only.');
     }
-    if (effectiveLevel < options.level) {
+    if (effectiveLevel < requestedLevel) {
       disclaimers.push(`Enhancement level reduced to ${effectiveLevel} for safety.`);
     }
 
