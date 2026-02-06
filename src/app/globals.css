@@ -1,0 +1,334 @@
+@import "tailwindcss";
+
+:root {
+  /* Dark theme with purple accents */
+  --background: #0a0a0f;
+  --background-secondary: #12121a;
+  --background-tertiary: #1a1a25;
+  --foreground: #f0f0f5;
+  --foreground-muted: #8888a0;
+  
+  /* Purple accent colors */
+  --accent: #a855f7;
+  --accent-glow: rgba(168, 85, 247, 0.4);
+  --accent-subtle: rgba(168, 85, 247, 0.15);
+  --accent-hover: #9333ea;
+  
+  /* Status colors */
+  --success: #22c55e;
+  --warning: #eab308;
+  --error: #ef4444;
+  --info: #3b82f6;
+  
+  /* Borders */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-accent: rgba(168, 85, 247, 0.3);
+  
+  /* Shadows */
+  --glow-sm: 0 0 10px var(--accent-glow);
+  --glow-md: 0 0 20px var(--accent-glow);
+  --glow-lg: 0 0 40px var(--accent-glow);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-background-secondary: var(--background-secondary);
+  --color-background-tertiary: var(--background-tertiary);
+  --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-border-accent: var(--border-accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent-subtle);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-glow);
+}
+
+/* Focus styles */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Button base styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  font-weight: 500;
+  border-radius: 0.75rem;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  font-size: 0.9375rem;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  border: none;
+  box-shadow: var(--glow-sm);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  box-shadow: var(--glow-md);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: var(--background-tertiary);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+  border-color: var(--border-accent);
+  background: var(--background-secondary);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--foreground-muted);
+  border: none;
+}
+
+.btn-ghost:hover {
+  color: var(--foreground);
+  background: var(--background-tertiary);
+}
+
+/* Card styles */
+.card {
+  background: var(--background-secondary);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1.5rem;
+}
+
+.card-glow {
+  box-shadow: var(--glow-sm);
+  border-color: var(--border-accent);
+}
+
+/* Input styles */
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--background-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  color: var(--foreground);
+  font-size: 1rem;
+  transition: all 0.2s ease;
+}
+
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.input::placeholder {
+  color: var(--foreground-muted);
+}
+
+/* Glow effects */
+.glow-text {
+  text-shadow: 0 0 20px var(--accent-glow), 0 0 40px var(--accent-glow);
+}
+
+.glow-border {
+  box-shadow: var(--glow-sm);
+  border-color: var(--border-accent);
+}
+
+/* Skeleton loading animation */
+@keyframes skeleton-pulse {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--background-tertiary) 0%,
+    var(--background-secondary) 50%,
+    var(--background-tertiary) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+/* Score circle */
+.score-circle {
+  position: relative;
+  width: 120px;
+  height: 120px;
+}
+
+.score-circle svg {
+  transform: rotate(-90deg);
+}
+
+.score-circle .score-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Accordion */
+.accordion-trigger[data-state="open"] .accordion-chevron {
+  transform: rotate(180deg);
+}
+
+.accordion-chevron {
+  transition: transform 0.2s ease;
+}
+
+/* Progress bar */
+.progress-bar {
+  height: 6px;
+  background: var(--background-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Badge */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge-accent {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.badge-success {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+}
+
+.badge-warning {
+  background: rgba(234, 179, 8, 0.15);
+  color: var(--warning);
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--error);
+}
+
+/* Toast container positioning */
+[data-sonner-toaster] {
+  --normal-bg: var(--background-secondary);
+  --normal-border: var(--border);
+  --normal-text: var(--foreground);
+}
+
+/* Responsive utilities */
+@media (max-width: 640px) {
+  .card {
+    padding: 1rem;
+    border-radius: 0.75rem;
+  }
+  
+  .btn {
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* Animation utilities */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease forwards;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: var(--glow-sm);
+  }
+  50% {
+    box-shadow: var(--glow-md);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
