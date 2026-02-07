@@ -18,13 +18,29 @@ export function AppShell({ children, requireAuth = false }: AppShellProps) {
   const supabase = createClient();
 
   useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
+    // Handle missing Supabase configuration
+    if (!supabase) {
+      console.warn('Supabase client not available - auth features disabled');
       setLoading(false);
+      // If auth is required but Supabase is not configured, show error
+      if (requireAuth) {
+        console.error('Authentication required but Supabase is not configured');
+      }
+      return;
+    }
 
-      if (requireAuth && !user) {
-        router.push('/auth');
+    const getUser = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        setUser(user);
+        setLoading(false);
+
+        if (requireAuth && !user) {
+          router.push('/auth');
+        }
+      } catch (error) {
+        console.error('Error getting user:', error);
+        setLoading(false);
       }
     };
 
@@ -42,9 +58,13 @@ export function AppShell({ children, requireAuth = false }: AppShellProps) {
     return () => {
       subscription.unsubscribe();
     };
-  }, [requireAuth, router, supabase.auth]);
+  }, [requireAuth, router, supabase]);
 
   const handleSignOut = async () => {
+    if (!supabase) {
+      console.warn('Cannot sign out - Supabase client not available');
+      return;
+    }
     await supabase.auth.signOut();
     router.push('/');
   };

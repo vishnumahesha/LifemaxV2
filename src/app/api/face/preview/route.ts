@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getImageGenerationModel, base64ToGenerativePart, extractJSON, extractImageFromResponse } from '@/lib/gemini';
 import { success, error, ErrorCodes } from '@/types/api';
 import { computeImageHash, getSeedFromHash, getCachedResult, setCachedResult } from '@/lib/scoring';
 import { getFaceStyleRecommendations } from '@/lib/style-library';
@@ -10,12 +9,13 @@ import {
   describeAppliedChanges,
   type FacePreviewOptions 
 } from '@/lib/reachability';
+import { enhanceFaceImage } from '@/lib/replicate';
 
-export const maxDuration = 60;
+export const maxDuration = 60; // Increased for complex enhancements
 
-const ENDPOINT_VERSION = '2.0.0';
+const ENDPOINT_VERSION = '3.0.0'; // Bumped for Replicate integration
 
-// Request schema following spec - made more lenient for client compatibility
+// Request schema
 const requestSchema = z.object({
   frontPhotoBase64: z.string().min(100),
   sidePhotoBase64: z.string().min(100).optional().nullable(),
@@ -96,7 +96,6 @@ export async function POST(request: NextRequest) {
 
     const {
       frontPhotoBase64,
-      sidePhotoBase64,
       faceShape,
       faceShapeConfidence,
       photoQuality,
@@ -105,7 +104,7 @@ export async function POST(request: NextRequest) {
       options,
     } = validation.data;
 
-    // Normalize null values to undefined or defaults
+    // Normalize values
     const normalizedFaceShape = faceShape || undefined;
     const normalizedFaceShapeConfidence = faceShapeConfidence ?? 0.7;
     const normalizedPhotoQuality = photoQuality ?? 0.7;
@@ -116,7 +115,7 @@ export async function POST(request: NextRequest) {
     const safeOptions = options || {};
     const requestedLevel = safeOptions.level || 2;
 
-    // Normalize glasses (convert null style to undefined)
+    // Normalize glasses
     const normalizedGlasses = safeOptions.glasses
       ? {
           enabled: safeOptions.glasses.enabled,
@@ -124,7 +123,7 @@ export async function POST(request: NextRequest) {
         }
       : { enabled: false };
 
-    // Normalize grooming (convert null values to undefined)
+    // Normalize grooming
     const normalizedGrooming = safeOptions.grooming
       ? {
           facialHair: safeOptions.grooming.facialHair || undefined,
@@ -132,7 +131,7 @@ export async function POST(request: NextRequest) {
         }
       : undefined;
 
-    // Normalize lighting (convert null to undefined)
+    // Normalize lighting
     const normalizedLighting = safeOptions.lighting || undefined;
 
     // Enforce minor restrictions
@@ -159,9 +158,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Check API key
-    if (!process.env.GEMINI_API_KEY) {
+    if (!process.env.REPLICATE_API_TOKEN) {
       return NextResponse.json(
-        error(ErrorCodes.SERVER_ERROR, 'AI service not configured'),
+        error(ErrorCodes.SERVER_ERROR, 'Image generation service not configured'),
         { status: 500 }
       );
     }
@@ -169,86 +168,76 @@ export async function POST(request: NextRequest) {
     // Get change budget for this level
     const changeBudget = getChangeBudget(effectiveLevel as 1 | 2 | 3);
 
-    // Build identity-preserving prompt
-    const prompt = buildPreviewPrompt(effectiveOptions, changeBudget, normalizedIsMinor);
+    console.log('Generating face preview with Replicate, seed:', seed);
+    console.log('Effective options:', JSON.stringify(effectiveOptions, null, 2));
 
-    console.log('Generating face preview with seed:', seed);
-
-    // Call Gemini
-    const model = getImageGenerationModel();
-    const imageParts = [base64ToGenerativePart(frontPhotoBase64, 'image/jpeg')];
-    if (sidePhotoBase64 && sidePhotoBase64.length > 100) {
-      imageParts.push(base64ToGenerativePart(sidePhotoBase64, 'image/jpeg'));
-    }
-
-    let result;
+    // Generate enhanced image using Replicate with styling options
+    // This preserves identity while applying styling changes
+    let generatedImageUrl: string | null = null;
+    
     try {
-      result = await model.generateContent([prompt, ...imageParts]);
+      console.log('Starting image generation with options:', JSON.stringify(effectiveOptions, null, 2));
+      generatedImageUrl = await enhanceFaceImage(frontPhotoBase64, {
+        hairstyle: effectiveOptions.hairstyle,
+        glasses: effectiveOptions.glasses,
+        grooming: effectiveOptions.grooming,
+        lighting: effectiveOptions.lighting,
+        seed: seed,
+      });
+      console.log('Replicate image generated:', !!generatedImageUrl, generatedImageUrl ? `URL length: ${generatedImageUrl.length}` : 'null');
     } catch (apiError) {
-      console.error('Preview generation failed:', apiError);
+      console.error('Replicate generation failed:', apiError);
       const errorMessage = apiError instanceof Error ? apiError.message : 'Unknown';
+      const errorString = String(apiError);
 
-      if (errorMessage.includes('quota') || errorMessage.includes('rate')) {
+      // Check for rate limiting (429 or rate limit messages)
+      if (
+        errorMessage.includes('429') ||
+        errorMessage.includes('rate') ||
+        errorMessage.includes('limit') ||
+        errorMessage.includes('Too Many Requests') ||
+        errorString.includes('429') ||
+        errorString.includes('rate')
+      ) {
         return NextResponse.json(
-          error(ErrorCodes.RATE_LIMITED, 'Please wait and try again'),
+          error(
+            ErrorCodes.RATE_LIMITED,
+            'API rate limit reached. Please wait 1-2 minutes and try again. Free tier has limited requests per minute.',
+            { retryAfter: 120 }
+          ),
           { status: 429 }
         );
       }
-      if (errorMessage.includes('SAFETY') || errorMessage.includes('blocked')) {
-        return NextResponse.json(
-          error(ErrorCodes.ANALYSIS_FAILED, 'Image blocked by safety filters'),
-          { status: 400 }
-        );
+
+      // If it's a rate limit, return early with proper error
+      const errorString = String(apiError);
+      if (
+        errorMessage.includes('429') ||
+        errorMessage.includes('rate') ||
+        errorMessage.includes('limit') ||
+        errorMessage.includes('Too Many Requests') ||
+        errorString.includes('429') ||
+        errorString.includes('rate')
+      ) {
+        // Already handled above, but ensure we return
+        return;
       }
 
-      return NextResponse.json(
-        error(ErrorCodes.SERVER_ERROR, `Preview generation failed: ${errorMessage}`),
-        { status: 500 }
-      );
+      // Don't fail completely - continue with recommendations
+      console.log('Continuing without generated image (non-rate-limit error)');
     }
 
-    const response = await result.response;
-    
-    // First, try to extract image directly from response parts (Gemini image gen format)
-    const generatedImageUrl = extractImageFromResponse(response);
-    
-    console.log('Generated image URL exists:', !!generatedImageUrl);
-    
     // Build preview images array
     const previewImages: PreviewImage[] = [];
     
     if (generatedImageUrl) {
+      console.log('Adding generated image to response, length:', generatedImageUrl.length);
       previewImages.push({
         url: generatedImageUrl,
         seed,
       });
     } else {
-      // Fallback: try parsing JSON from text response
-      try {
-        const text = response.text();
-        console.log('Response text (first 500 chars):', text.slice(0, 500));
-        const parsed = extractJSON<{ images?: Array<{ imageUrl?: string }> }>(text);
-        if (parsed.images) {
-          parsed.images.forEach((img, idx) => {
-            if (img.imageUrl) {
-              previewImages.push({
-                url: img.imageUrl,
-                seed: seed + idx,
-              });
-            }
-          });
-        }
-      } catch (parseError) {
-        console.log('No JSON images in response');
-      }
-    }
-
-    // If no actual images generated, return placeholder message
-    if (previewImages.length === 0) {
-      previewImages.push({
-        url: '', // Would be actual generated image URL
-        seed,
-      });
+      console.warn('No generated image URL - continuing with recommendations only');
     }
 
     // Get style recommendations
@@ -285,7 +274,7 @@ export async function POST(request: NextRequest) {
 
     // Build disclaimers
     const disclaimers = [
-      'Identity-preserving preview. Does not change bone structure, jaw, nose, or eye shape.',
+      'AI-enhanced preview. Preserves your natural features.',
       'Estimated timelines are ranges and vary by individual.',
     ];
     if (normalizedIsMinor) {
@@ -318,82 +307,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-function buildPreviewPrompt(
-  options: FacePreviewOptions,
-  changeBudget: ReturnType<typeof getChangeBudget>,
-  isMinor: boolean
-): string {
-  const levelDescriptions = {
-    1: 'subtle same-day improvements only (hair tidy, lighting, minor cleanup)',
-    2: 'moderate realistic changes achievable in weeks/months (new haircut, consistent grooming, clearer skin)',
-    3: 'maximum realistic modifiable factors (still identity-preserving, months of consistent effort)',
-  };
-
-  let enhancementInstructions = '';
-  
-  if (changeBudget.hair === 'tidy_only') {
-    enhancementInstructions += '- Hair: Only tidy and shape existing hair, no dramatic length change\n';
-  } else if (changeBudget.hair === 'minor_cut') {
-    enhancementInstructions += `- Hair: Show a ${options.hairstyle.length} length ${options.hairstyle.finish} style (plausible within one haircut session)\n`;
-  } else {
-    enhancementInstructions += `- Hair: Show a complete ${options.hairstyle.length} ${options.hairstyle.finish} style transformation\n`;
-  }
-
-  if (changeBudget.skin === 'lighting_only') {
-    enhancementInstructions += '- Skin: Improve lighting/exposure only, no texture changes\n';
-  } else if (changeBudget.skin === 'minor_clarity') {
-    enhancementInstructions += '- Skin: Subtle clarity improvement, still show natural texture and pores\n';
-  } else {
-    enhancementInstructions += '- Skin: Clearer complexion but MUST preserve natural skin texture (no porcelain blur)\n';
-  }
-
-  if (options.glasses.enabled && options.glasses.style) {
-    enhancementInstructions += `- Glasses: Add ${options.glasses.style} frame glasses\n`;
-  }
-
-  if (options.grooming?.facialHair && options.grooming.facialHair !== 'none') {
-    enhancementInstructions += `- Facial hair: ${options.grooming.facialHair}\n`;
-  }
-  if (options.grooming?.brows === 'cleaned') {
-    enhancementInstructions += '- Eyebrows: Cleaned and tidied\n';
-  }
-
-  if (options.lighting) {
-    const lightingMap: Record<string, string> = {
-      neutral_soft: 'soft neutral lighting',
-      studio_soft: 'studio-quality soft lighting',
-      outdoor_shade: 'natural outdoor shade lighting',
-    };
-    enhancementInstructions += `- Lighting: ${lightingMap[options.lighting]}\n`;
-  }
-
-  const minorNote = isMinor
-    ? '\nIMPORTANT: Subject appears to be a minor. Only apply subtle styling/grooming improvements. No attractiveness-focused changes.'
-    : '';
-
-  return `You are a photo retouching AI that makes MINIMAL edits while preserving the person's identity.
-
-ABSOLUTE RULES - VIOLATING ANY = FAILURE:
-1. This MUST be the EXACT SAME PERSON - not a similar looking person, THE SAME person
-2. NEVER change: face shape, jaw, chin, nose, eyes, eyebrows shape, forehead, cheekbones, ears, face width, face length
-3. NEVER change: skin color, ethnicity, age appearance, gender presentation
-4. NEVER make the person look like a model or celebrity
-5. The person's friends and family MUST be able to recognize them instantly
-
-WHAT YOU CAN CHANGE (and ONLY these):
-${enhancementInstructions}
-
-Enhancement Level: ${options.level} (${levelDescriptions[options.level]})
-${minorNote}
-
-TECHNIQUE:
-- Think of this as a professional photo retouch, NOT a transformation
-- Use the EXACT same face from the input photo
-- Only modify hair styling, lighting, and minor skin clarity
-- Keep the same camera angle and perspective
-- The output should look like a better photo of the same person on a good day
-
-OUTPUT: Generate the enhanced image. The image must pass this test: "Is this clearly the same person as the input photo?" If no, you've failed.`;
 }

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getImageGenerationModel, base64ToGenerativePart, extractJSON, extractImageFromResponse } from '@/lib/gemini';
 import { success, error, ErrorCodes } from '@/types/api';
 import { computeImageHash, getSeedFromHash, getCachedResult, setCachedResult } from '@/lib/scoring';
 import { getBodyStyleRecommendations } from '@/lib/style-library';
@@ -11,10 +10,11 @@ import {
   type BodyPreviewOptions,
 } from '@/lib/reachability';
 import type { KibbeType } from '@/types/body';
+import { enhanceBodyImage } from '@/lib/replicate';
 
 export const maxDuration = 60;
 
-const ENDPOINT_VERSION = '1.0.0';
+const ENDPOINT_VERSION = '2.0.0'; // Bumped for Replicate integration
 
 // Request schema following spec
 const requestSchema = z.object({
@@ -78,7 +78,6 @@ export async function POST(request: NextRequest) {
     const {
       frontPhotoBase64,
       sidePhotoBase64,
-      backPhotoBase64,
       kibbeType,
       kibbeConfidence,
       photoQuality,
@@ -107,98 +106,44 @@ export async function POST(request: NextRequest) {
     }
 
     // Check API key
-    if (!process.env.GEMINI_API_KEY) {
+    if (!process.env.REPLICATE_API_TOKEN) {
       return NextResponse.json(
-        error(ErrorCodes.SERVER_ERROR, 'AI service not configured'),
+        error(ErrorCodes.SERVER_ERROR, 'Image generation service not configured'),
         { status: 500 }
       );
     }
 
-    // Get change budget for this level
-    const changeBudget = getChangeBudget(effectiveLevel as 1 | 2 | 3);
     const hasSideView = !!sidePhotoBase64;
 
-    // Build identity-preserving prompt
-    const prompt = buildBodyPreviewPrompt(effectiveOptions, changeBudget, isMinor, hasSideView);
+    console.log('Generating body preview with Replicate, seed:', seed);
 
-    console.log('Generating body preview with seed:', seed);
-
-    // Call Gemini
-    const model = getImageGenerationModel();
-    const imageParts = [base64ToGenerativePart(frontPhotoBase64, 'image/jpeg')];
-    if (sidePhotoBase64) {
-      imageParts.push(base64ToGenerativePart(sidePhotoBase64, 'image/jpeg'));
-    }
-    if (backPhotoBase64) {
-      imageParts.push(base64ToGenerativePart(backPhotoBase64, 'image/jpeg'));
-    }
-
-    let result;
+    // Generate enhanced image using Replicate
+    let generatedImageUrl: string | null = null;
+    
     try {
-      result = await model.generateContent([prompt, ...imageParts]);
+      generatedImageUrl = await enhanceBodyImage(frontPhotoBase64);
+      console.log('Replicate body image generated:', !!generatedImageUrl);
     } catch (apiError) {
-      console.error('Body preview generation failed:', apiError);
+      console.error('Replicate body generation failed:', apiError);
       const errorMessage = apiError instanceof Error ? apiError.message : 'Unknown';
 
-      if (errorMessage.includes('quota') || errorMessage.includes('rate')) {
+      if (errorMessage.includes('rate') || errorMessage.includes('limit')) {
         return NextResponse.json(
           error(ErrorCodes.RATE_LIMITED, 'Please wait and try again'),
           { status: 429 }
         );
       }
-      if (errorMessage.includes('SAFETY') || errorMessage.includes('blocked')) {
-        return NextResponse.json(
-          error(ErrorCodes.ANALYSIS_FAILED, 'Image blocked by safety filters'),
-          { status: 400 }
-        );
-      }
 
-      return NextResponse.json(
-        error(ErrorCodes.SERVER_ERROR, `Preview generation failed: ${errorMessage}`),
-        { status: 500 }
-      );
+      // Don't fail completely - continue with recommendations
+      console.log('Continuing without generated image');
     }
 
-    const response = await result.response;
-    
-    // First, try to extract image directly from response parts (Gemini image gen format)
-    const generatedImageUrl = extractImageFromResponse(response);
-    
-    console.log('Generated body image URL exists:', !!generatedImageUrl);
-    
     // Build preview images array
     const previewImages: PreviewImage[] = [];
     
     if (generatedImageUrl) {
       previewImages.push({
         url: generatedImageUrl,
-        seed,
-      });
-    } else {
-      // Fallback: try parsing JSON from text response
-      try {
-        const text = response.text();
-        console.log('Body response text (first 500 chars):', text.slice(0, 500));
-        const parsed = extractJSON<{ images?: Array<{ imageUrl?: string }> }>(text);
-        if (parsed.images) {
-          parsed.images.slice(0, effectiveOptions.variations || 1).forEach((img, idx) => {
-            if (img.imageUrl) {
-              previewImages.push({
-                url: img.imageUrl,
-                seed: seed + idx,
-              });
-            }
-          });
-        }
-      } catch (parseError) {
-        console.log('No JSON images in body response');
-      }
-    }
-
-    // If still no images, add empty placeholder
-    if (previewImages.length === 0) {
-      previewImages.push({
-        url: '',
         seed,
       });
     }
@@ -228,9 +173,9 @@ export async function POST(request: NextRequest) {
 
     // Build disclaimers
     const disclaimers = [
-      'Identity-preserving preview. Does not change bone structure or body frame.',
-      'Body composition changes shown are estimates based on typical progress rates.',
-      'Actual results depend on individual factors, consistency, and genetics.',
+      'AI-enhanced preview. Preserves your natural body and features.',
+      'Styling recommendations based on your body type analysis.',
+      'Actual results depend on individual factors and consistency.',
     ];
     if (isMinor) {
       disclaimers.push('Minor detected: showing styling and posture improvements only.');
@@ -263,87 +208,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-function buildBodyPreviewPrompt(
-  options: BodyPreviewOptions,
-  changeBudget: ReturnType<typeof getChangeBudget>,
-  isMinor: boolean,
-  hasSideView: boolean
-): string {
-  const levelDescriptions = {
-    1: 'posture + outfit + lighting only (days to 2 weeks)',
-    2: 'moderate recomposition preview (8-16 weeks of consistent effort)',
-    3: 'significant but realistic changes (12-40 weeks depending on starting point)',
-  };
-
-  const goalDescriptions = {
-    get_leaner: 'leaner physique with reduced body fat',
-    build_muscle: 'increased muscle mass and tone',
-    balanced: 'balanced recomposition (slight fat loss + muscle gain)',
-  };
-
-  const outfitDescriptions = {
-    fitted_basics: 'clean fitted basics (t-shirt, well-fitted jeans)',
-    athleisure: 'athletic/leisure wear (fitted activewear)',
-    smart_casual: 'smart casual (button-down, chinos)',
-    formal: 'formal attire (blazer, dress shirt)',
-  };
-
-  let enhancementInstructions = '';
-
-  // Outfit
-  enhancementInstructions += `- Outfit: ${outfitDescriptions[options.outfit]}\n`;
-
-  // Body composition based on budget
-  if (changeBudget.bodyComposition === 'presentation_only') {
-    enhancementInstructions += '- Body: Presentation/styling only, NO physique changes\n';
-  } else if (changeBudget.bodyComposition === 'minor_recomp') {
-    enhancementInstructions += `- Body: Subtle ${goalDescriptions[options.goal]} (realistic 8-16 week progress)\n`;
-  } else {
-    enhancementInstructions += `- Body: ${goalDescriptions[options.goal]} (realistic 12-40 week progress, NOT extreme)\n`;
-  }
-
-  // Posture
-  if (options.postureFocus === 'improve_posture' && changeBudget.posture !== 'none') {
-    if (hasSideView) {
-      enhancementInstructions += '- Posture: Improved alignment (shoulders back, neutral spine)\n';
-    } else {
-      enhancementInstructions += '- Posture: Subtle improvement (limited by no side view reference)\n';
-    }
-  }
-
-  enhancementInstructions += '- Lighting: Optimized for clarity and natural presentation\n';
-
-  const minorNote = isMinor
-    ? '\nIMPORTANT: Subject appears to be a minor. Only apply styling and posture improvements. NO body composition or attractiveness-focused changes.'
-    : '';
-
-  return `You are a photo retouching AI for body photos. Make MINIMAL, realistic edits while keeping the EXACT same person.
-
-ABSOLUTE RULES - VIOLATING ANY = FAILURE:
-1. This MUST be the EXACT SAME PERSON - their face, body frame, and proportions stay identical
-2. NEVER change: bone structure, skeletal frame, height, natural body shape, face
-3. NEVER make the person look like a fitness model or different person
-4. Keep the EXACT same background, angle, and setting
-5. The person MUST be instantly recognizable as themselves
-
-WHAT YOU CAN CHANGE (and ONLY these):
-${enhancementInstructions}
-
-Enhancement Level: ${options.level} (${levelDescriptions[options.level]})
-${minorNote}
-
-REALISM FOR BODY CHANGES:
-- Level 1: Posture/outfit only - NO body composition changes
-- Level 2: Very subtle (~5-10lbs visual difference max over 8-16 weeks)
-- Level 3: Moderate (~15-20lbs visual difference max over months)
-- NEVER show extreme transformations - keep it believable
-
-TECHNIQUE:
-- Think of this as showing the same person on their best day with better posture/outfit
-- Use the EXACT same body from the input - just minor adjustments
-- The output should pass: "Is this clearly the same person?" test
-
-OUTPUT: Generate the enhanced image.`;
 }

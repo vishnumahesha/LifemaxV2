@@ -427,25 +427,71 @@ export default function BestVersionContent() {
         requestBody.faceShapeConfidence = faceScanData.faceShapeConfidence || 0.7;
       }
 
+      // Add timeout to fetch request (65 seconds - slightly longer than API timeout)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 65000);
+
       const response = await fetch('/api/face/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        // Handle rate limit specifically
+        if (response.status === 429) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error?.message || 'Rate limit reached. Please wait 1-2 minutes and try again.');
+        }
+        throw new Error(`Server error: ${response.status}`);
+      }
 
       const data: ApiResult<PreviewResult> = await response.json();
 
       if (!data.ok) {
+        // Check if it's a rate limit error
+        if (data.error?.code === 'RATE_LIMITED' || data.error?.message?.includes('rate limit')) {
+          throw new Error('Rate limit reached. Please wait 1-2 minutes before trying again. Free tier has limited requests per minute.');
+        }
         throw new Error(data.error.message);
       }
+
+      console.log('Preview result:', {
+        hasImages: !!data.data.images,
+        imageCount: data.data.images?.length || 0,
+        firstImageUrl: data.data.images?.[0]?.url ? 'exists' : 'missing',
+        urlLength: data.data.images?.[0]?.url?.length || 0,
+      });
 
       setResult(data.data);
       setRecommendedChips(data.data.recommendedOptions);
       setPageState('results');
-      toast.success('Preview generated!');
+      
+      if (data.data.images && data.data.images.length > 0 && data.data.images[0]?.url) {
+        toast.success('Preview generated successfully!');
+      } else {
+        toast.warning('Preview generated, but image enhancement unavailable. Showing recommendations only.');
+      }
     } catch (err) {
-      console.error(err);
-      toast.error(err instanceof Error ? err.message : 'Failed to generate preview');
+      console.error('Generation error:', err);
+      let errorMessage = 'Failed to generate preview';
+      
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          errorMessage = 'Request timed out. Please try again with a smaller image or check your connection.';
+        } else if (err.message.includes('429') || err.message.includes('rate limit') || err.message.includes('Rate limit')) {
+          errorMessage = '⚠️ Rate limit reached! Please wait 2-3 minutes before trying again. The free Replicate tier has limited requests per minute.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      toast.error(errorMessage, {
+        duration: 5000, // Show for 5 seconds
+      });
       setPageState('customize');
     }
   };
@@ -604,6 +650,8 @@ export default function BestVersionContent() {
                 <Sparkles className="absolute inset-0 m-auto w-10 h-10 text-pink-400" />
               </div>
               <h3 className="text-xl font-semibold text-white mb-2">Generating Your Best Version</h3>
+              <p className="text-sm text-zinc-400 mb-4">Applying enhancements: leaner face, striking eyes, smooth skin, enhanced brows & hair, professional lighting...</p>
+              <p className="text-xs text-zinc-500">This may take 30-60 seconds for best results</p>
               <p className="text-zinc-400 text-sm">Preserving your identity while applying improvements...</p>
             </motion.div>
           )}

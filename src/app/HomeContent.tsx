@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { AppShell } from '@/components/AppShell';
 
-// Animated counter hook
+// Animated counter hook - optimized with requestAnimationFrame
 function useAnimatedCounter(end: number, duration: number = 2000, delay: number = 0) {
   const [count, setCount] = useState(0);
   const [started, setStarted] = useState(false);
@@ -28,17 +28,22 @@ function useAnimatedCounter(end: number, duration: number = 2000, delay: number 
     const timeout = setTimeout(() => {
       setStarted(true);
       let start = 0;
-      const increment = end / (duration / 16);
-      const timer = setInterval(() => {
-        start += increment;
-        if (start >= end) {
-          setCount(end);
-          clearInterval(timer);
+      const startTime = Date.now();
+      
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        start = end * progress;
+        setCount(start);
+        
+        if (progress < 1) {
+          requestAnimationFrame(animate);
         } else {
-          setCount(start);
+          setCount(end);
         }
-      }, 16);
-      return () => clearInterval(timer);
+      };
+      
+      requestAnimationFrame(animate);
     }, delay);
     return () => clearTimeout(timeout);
   }, [end, duration, delay]);
@@ -249,8 +254,8 @@ function PhoneMockup() {
       transition={{ duration: 1, delay: 0.2, ease: "easeOut" }}
       className="relative mx-auto"
     >
-      {/* Phone glow */}
-      <div className="absolute -inset-4 bg-gradient-to-r from-emerald-500/20 via-purple-500/20 to-emerald-500/20 rounded-[50px] blur-2xl opacity-60 animate-pulse" />
+      {/* Phone glow - reduced blur for performance */}
+      <div className="absolute -inset-4 bg-gradient-to-r from-emerald-500/20 via-purple-500/20 to-emerald-500/20 rounded-[50px] blur-xl opacity-60 animate-pulse" style={{ willChange: 'opacity' }} />
       
       {/* Phone Frame */}
       <div className="relative w-[300px] h-[600px] bg-gradient-to-b from-zinc-700 to-zinc-900 rounded-[45px] p-2 shadow-2xl border border-zinc-600">
@@ -289,7 +294,7 @@ function PhoneMockup() {
               <span className="text-sm font-semibold text-emerald-400">+1.4 possible</span>
             </motion.div>
             
-            {/* Score Bars */}
+            {/* Score Bars - staggered for better performance */}
             <div className="mt-6 space-y-3">
               <AnimatedProgressBar icon="✨" value={5.2} delay={1800} color="yellow" />
               <AnimatedProgressBar icon="👁️" value={5.8} delay={2000} color="orange" />
@@ -437,10 +442,10 @@ export default function HomeContent() {
       <div className="min-h-screen bg-zinc-950">
         {/* Hero Section */}
         <section className="relative px-4 pt-16 pb-24 overflow-hidden">
-          {/* Animated background gradients */}
-          <div className="absolute inset-0">
-            <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-purple-500/20 rounded-full blur-[150px] animate-pulse" />
-            <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-emerald-500/15 rounded-full blur-[150px] animate-pulse" style={{ animationDelay: '1s' }} />
+          {/* Animated background gradients - reduced blur for performance */}
+          <div className="absolute inset-0 will-change-transform">
+            <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-purple-500/20 rounded-full blur-[100px] animate-pulse" style={{ willChange: 'opacity' }} />
+            <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-emerald-500/15 rounded-full blur-[100px] animate-pulse" style={{ animationDelay: '1s', willChange: 'opacity' }} />
           </div>
           
           <div className="relative max-w-7xl mx-auto">

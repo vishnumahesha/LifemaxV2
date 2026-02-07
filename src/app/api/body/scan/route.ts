@@ -137,12 +137,21 @@ export async function POST(request: NextRequest) {
       // Post-process for determinism
       analysisData = postProcessBodyResult(rawData, hasSidePhoto);
       
+      // Validate with zod - fail if validation fails
       const validated = bodyAnalysisResultSchema.safeParse(analysisData);
       if (!validated.success) {
-        console.warn('Validation warnings:', validated.error.flatten());
-      } else {
-        analysisData = validated.data;
+        console.error('Validation failed:', validated.error.flatten());
+        console.error('Invalid analysis data:', JSON.stringify(analysisData, null, 2));
+        return NextResponse.json(
+          error(
+            ErrorCodes.ANALYSIS_FAILED,
+            'AI response validation failed. The analysis data structure is invalid.',
+            { validationErrors: validated.error.flatten() }
+          ),
+          { status: 500 }
+        );
       }
+      analysisData = validated.data;
     } catch (parseError) {
       console.error('Failed to parse AI response:', parseError);
       console.error('Raw response:', text.substring(0, 500));
