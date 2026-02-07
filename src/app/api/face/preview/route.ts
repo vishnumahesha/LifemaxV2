@@ -209,20 +209,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // If it's a rate limit, return early with proper error
-      const errorString = String(apiError);
-      if (
-        errorMessage.includes('429') ||
-        errorMessage.includes('rate') ||
-        errorMessage.includes('limit') ||
-        errorMessage.includes('Too Many Requests') ||
-        errorString.includes('429') ||
-        errorString.includes('rate')
-      ) {
-        // Already handled above, but ensure we return
-        return;
-      }
-
       // Don't fail completely - continue with recommendations
       console.log('Continuing without generated image (non-rate-limit error)');
     }
