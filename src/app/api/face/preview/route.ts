@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getImageGenerationModel, base64ToGenerativePart, extractJSON } from '@/lib/gemini';
+import { getImageGenerationModel, base64ToGenerativePart, extractJSON, extractImageFromResponse } from '@/lib/gemini';
 import { success, error, ErrorCodes } from '@/types/api';
 import { computeImageHash, getSeedFromHash, getCachedResult, setCachedResult } from '@/lib/scoring';
 import { getFaceStyleRecommendations } from '@/lib/style-library';
@@ -208,25 +208,40 @@ export async function POST(request: NextRequest) {
     }
 
     const response = await result.response;
-    const text = response.text();
-
-    // Parse response
-    let generatedImages: Array<{ imageUrl?: string; description?: string }> = [];
-    try {
-      const parsed = extractJSON<{ images?: typeof generatedImages }>(text);
-      generatedImages = parsed.images || [];
-    } catch {
-      // If no JSON, treat as description only
-      generatedImages = [{ description: text.slice(0, 200) }];
-    }
-
+    
+    // First, try to extract image directly from response parts (Gemini image gen format)
+    const generatedImageUrl = extractImageFromResponse(response);
+    
+    console.log('Generated image URL exists:', !!generatedImageUrl);
+    
     // Build preview images array
-    const previewImages: PreviewImage[] = generatedImages
-      .filter((img) => img.imageUrl)
-      .map((img, idx) => ({
-        url: img.imageUrl!,
-        seed: seed + idx,
-      }));
+    const previewImages: PreviewImage[] = [];
+    
+    if (generatedImageUrl) {
+      previewImages.push({
+        url: generatedImageUrl,
+        seed,
+      });
+    } else {
+      // Fallback: try parsing JSON from text response
+      try {
+        const text = response.text();
+        console.log('Response text (first 500 chars):', text.slice(0, 500));
+        const parsed = extractJSON<{ images?: Array<{ imageUrl?: string }> }>(text);
+        if (parsed.images) {
+          parsed.images.forEach((img, idx) => {
+            if (img.imageUrl) {
+              previewImages.push({
+                url: img.imageUrl,
+                seed: seed + idx,
+              });
+            }
+          });
+        }
+      } catch (parseError) {
+        console.log('No JSON images in response');
+      }
+    }
 
     // If no actual images generated, return placeholder message
     if (previewImages.length === 0) {

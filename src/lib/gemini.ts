@@ -59,13 +59,15 @@ export function getTextModel() {
 }
 
 // Model for image generation/editing
+// Uses Gemini 2.0 Flash with experimental image generation capability
 export function getImageGenerationModel() {
   return genAI.getGenerativeModel({
     model: 'gemini-2.0-flash-exp-image-generation',
     generationConfig: {
-      temperature: 1,
+      temperature: 0.8, // Some creativity but not too random
       topP: 0.95,
       topK: 40,
+      // Note: Response modalities for image output are set in the API call
     },
   });
 }
@@ -101,20 +103,46 @@ export function extractJSON<T>(text: string): T {
 }
 
 // Extract base64 image from response
+// Handles both GenerateContentResponse objects and raw response structures
 export function extractImageFromResponse(response: any): string | null {
   try {
-    const candidates = response.candidates;
-    if (!candidates || candidates.length === 0) return null;
+    // Try to get candidates from response
+    let candidates = response.candidates;
+    
+    // If response has a candidates() method (GenerateContentResponse), call it
+    if (!candidates && typeof response.candidates === 'function') {
+      candidates = response.candidates();
+    }
+    
+    if (!candidates || candidates.length === 0) {
+      console.log('No candidates in response');
+      return null;
+    }
     
     const parts = candidates[0].content?.parts;
-    if (!parts) return null;
+    if (!parts) {
+      console.log('No parts in response candidate');
+      return null;
+    }
+    
+    console.log('Response parts count:', parts.length);
     
     for (const part of parts) {
+      // Check for inline image data
       if (part.inlineData?.data) {
         const mimeType = part.inlineData.mimeType || 'image/png';
+        console.log('Found inline image data, mimeType:', mimeType);
         return `data:${mimeType};base64,${part.inlineData.data}`;
       }
+      
+      // Check for file data (some models use this)
+      if (part.fileData?.fileUri) {
+        console.log('Found file URI:', part.fileData.fileUri);
+        return part.fileData.fileUri;
+      }
     }
+    
+    console.log('No image data found in parts');
     return null;
   } catch (e) {
     console.error('Error extracting image:', e);
