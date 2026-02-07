@@ -5,11 +5,12 @@
 1. **Go to Cloudflare Dashboard** → Pages → Create a project
 2. **Connect your GitHub repository**: `vishnumahesha/LifemaxV2`
 3. **Configure build settings**:
-   - **Framework preset**: Next.js
-   - **Build command**: `npm run build`
-   - **Build output directory**: `.next`
-   - **Root directory**: `lifemax-app` (if deploying from monorepo root, or leave blank if deploying from app root)
+   - **Framework preset**: Next.js (Static HTML Export) - **IMPORTANT: Use this preset!**
+   - **Build command**: `cd lifemax-app && npm install && npm run build`
+   - **Build output directory**: `lifemax-app/.next` (or `.next` if root is set to `lifemax-app`)
+   - **Root directory**: (leave blank, or set to `lifemax-app` if deploying from monorepo)
    - **Node version**: 20.x (or latest LTS)
+   - **⚠️ DO NOT SET A CUSTOM DEPLOY COMMAND** - Cloudflare Pages handles Next.js automatically!
 
 ## Environment Variables
 
