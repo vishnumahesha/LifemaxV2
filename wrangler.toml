@@ -1,0 +1,7 @@
+name = "lifemax-app"
+compatibility_date = "2024-01-01"
+
+# Cloudflare Pages configuration
+# Build command: npm run build
+# Output directory: .next
+# Node version: 20.x
