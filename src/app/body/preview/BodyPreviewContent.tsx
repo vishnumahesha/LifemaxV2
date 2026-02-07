@@ -525,34 +525,54 @@ export default function BodyPreviewContent() {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-6"
             >
-              {/* Main Results Card */}
-              <div className="p-6 bg-gradient-to-br from-zinc-900 to-cyan-950/30 border border-cyan-500/20 rounded-2xl">
-                <div className="flex items-center gap-4 mb-6">
-                  {/* Your Photo */}
-                  <div className="w-20 h-28 rounded-xl overflow-hidden border-2 border-cyan-500/30 flex-shrink-0">
-                    {photoPreview && (
-                      <img src={photoPreview} alt="You" className="w-full h-full object-cover" />
-                    )}
+              {/* Before/After Comparison */}
+              <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
+                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                  <Dumbbell className="w-5 h-5 text-cyan-400" />
+                  Your Best Physique Preview
+                </h2>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="text-center">
+                    <div className="text-sm text-zinc-500 mb-2">Current</div>
+                    <div className="aspect-[3/4] rounded-xl overflow-hidden border border-zinc-700">
+                      {photoPreview && (
+                        <img src={photoPreview} alt="Current" className="w-full h-full object-cover" />
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-white mb-1">Your Transformation Roadmap</h2>
-                    <p className="text-zinc-400 text-sm">Realistic goals based on your selections</p>
+                  <div className="text-center">
+                    <div className="text-sm text-cyan-400 mb-2">Best Version</div>
+                    <div className="aspect-[3/4] rounded-xl overflow-hidden border border-cyan-500/30 bg-zinc-800">
+                      {result.images[0]?.url ? (
+                        <img
+                          src={result.images[0].url.startsWith('data:') ? result.images[0].url : `data:image/png;base64,${result.images[0].url}`}
+                          alt="Best Version"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 p-4">
+                          <Dumbbell className="w-8 h-8 mb-2 text-cyan-400" />
+                          <p className="text-sm text-center">Preview generated - see your plan below</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Time Estimate - Prominent */}
-                <div className="p-4 bg-black/30 rounded-xl mb-6 flex items-center justify-between">
+                {/* Time Estimate */}
+                <div className="p-4 bg-black/30 rounded-xl flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-cyan-500/20 flex items-center justify-center">
-                      <Timer className="w-6 h-6 text-cyan-400" />
+                    <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                      <Timer className="w-5 h-5 text-cyan-400" />
                     </div>
                     <div>
-                      <div className="text-2xl font-bold text-cyan-400">
+                      <div className="text-xl font-bold text-cyan-400">
                         {result.reachability.estimatedWeeks.min === result.reachability.estimatedWeeks.max
                           ? `~${result.reachability.estimatedWeeks.min} weeks`
                           : `${result.reachability.estimatedWeeks.min}-${result.reachability.estimatedWeeks.max} weeks`}
                       </div>
-                      <div className="text-sm text-zinc-500">to reach this physique</div>
+                      <div className="text-xs text-zinc-500">to reach this physique</div>
                     </div>
                   </div>
                   <div className={`px-3 py-1 rounded-full text-sm ${
@@ -565,22 +585,24 @@ export default function BodyPreviewContent() {
                     {result.reachability.confidence >= 0.7 ? 'High' : result.reachability.confidence >= 0.5 ? 'Medium' : 'Low'} confidence
                   </div>
                 </div>
+              </div>
 
-                {/* Action Items */}
+              {/* What Changed */}
+              <div className="p-6 bg-gradient-to-br from-zinc-900/80 to-cyan-900/20 border border-cyan-500/20 rounded-2xl">
                 <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
-                  <Dumbbell className="w-5 h-5 text-cyan-400" />
-                  Your Action Plan
+                  <Check className="w-5 h-5 text-cyan-400" />
+                  Changes Applied
                 </h3>
                 <div className="grid gap-3">
                   {result.appliedChanges.map((change, i) => {
                     const [title, description] = change.split(':');
-                    const icons: Record<string, React.ReactNode> = {
-                      'Body': <span className="text-lg">💪</span>,
-                      'Posture': <span className="text-lg">🧘</span>,
-                      'Outfit': <span className="text-lg">👔</span>,
-                      'Lighting': <span className="text-lg">💡</span>,
-                      'Leanness': <span className="text-lg">🔥</span>,
-                      'Muscle': <span className="text-lg">💪</span>,
+                    const icons: Record<string, string> = {
+                      'Body': '💪',
+                      'Posture': '🧘',
+                      'Outfit': '👔',
+                      'Lighting': '💡',
+                      'Leanness': '🔥',
+                      'Muscle': '💪',
                     };
                     return (
                       <motion.div
@@ -588,37 +610,17 @@ export default function BodyPreviewContent() {
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: i * 0.1 }}
-                        className="p-4 bg-zinc-800/50 rounded-xl flex items-start gap-4 hover:bg-zinc-800/70 transition-colors"
+                        className="p-3 bg-zinc-800/50 rounded-xl flex items-center gap-3"
                       >
-                        <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
-                          {icons[title] || <Check className="w-5 h-5 text-cyan-400" />}
-                        </div>
+                        <span className="text-xl">{icons[title] || '✓'}</span>
                         <div className="flex-1">
-                          <div className="font-medium text-white">{title}</div>
-                          <div className="text-sm text-zinc-400">{description || 'Recommended improvement'}</div>
-                        </div>
-                        <div className="text-xs text-cyan-400 bg-cyan-500/10 px-2 py-1 rounded">
-                          {i === 0 ? 'Priority' : `Step ${i + 1}`}
+                          <span className="text-white font-medium">{title}</span>
+                          {description && <span className="text-zinc-400 ml-1">- {description.trim()}</span>}
                         </div>
                       </motion.div>
                     );
                   })}
                 </div>
-
-                {/* Assumptions */}
-                {result.reachability.assumptions.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-zinc-800">
-                    <p className="text-xs text-zinc-500 mb-2">Assumes:</p>
-                    <ul className="space-y-1">
-                      {result.reachability.assumptions.map((assumption, i) => (
-                        <li key={i} className="text-xs text-zinc-500 flex items-center gap-2">
-                          <span className="w-1 h-1 rounded-full bg-zinc-600" />
-                          {assumption}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
               </div>
 
               {/* Silhouette Tips */}
@@ -640,8 +642,8 @@ export default function BodyPreviewContent() {
               <div className="p-4 bg-cyan-500/5 border border-cyan-500/10 rounded-xl flex items-start gap-3">
                 <Info className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-zinc-400">
-                  <strong className="text-white">Natural Progress:</strong> This plan works with your body's natural frame. 
-                  Results depend on consistent effort, nutrition, and recovery.
+                  <strong className="text-white">Same You, Better Presentation:</strong> No frame or bone structure changes. 
+                  Only posture, outfit, and realistic progress shown.
                 </div>
               </div>
 
@@ -661,6 +663,16 @@ export default function BodyPreviewContent() {
                   <ImagePlus className="w-4 h-4" />
                   New Photo
                 </button>
+                {result.images[0]?.url && (
+                  <a
+                    href={result.images[0].url.startsWith('data:') ? result.images[0].url : `data:image/png;base64,${result.images[0].url}`}
+                    download="best-physique.png"
+                    className="px-6 py-3 bg-cyan-500 text-white rounded-xl flex items-center gap-2 hover:bg-cyan-600"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </a>
+                )}
               </div>
             </motion.div>
           )}

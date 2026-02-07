@@ -304,40 +304,31 @@ function buildBodyPreviewPrompt(
     ? '\nIMPORTANT: Subject appears to be a minor. Only apply styling and posture improvements. NO body composition or attractiveness-focused changes.'
     : '';
 
-  return `You are an identity-preserving body visualization AI. Generate a "best version" preview of this person.
+  return `You are a photo retouching AI for body photos. Make MINIMAL, realistic edits while keeping the EXACT same person.
 
-CRITICAL CONSTRAINTS (MUST FOLLOW):
-1. PRESERVE IDENTITY: Same person, same body frame. Do NOT change:
-   - Bone structure or skeletal frame
-   - Height
-   - Natural body proportions
-   - Fundamental shape
-2. NO "DIFFERENT PERSON": The output must be the same individual
-3. NO IMPOSSIBLE TRANSFORMATIONS: Changes must be achievable naturally
-4. ONLY MODIFY as specified below
+ABSOLUTE RULES - VIOLATING ANY = FAILURE:
+1. This MUST be the EXACT SAME PERSON - their face, body frame, and proportions stay identical
+2. NEVER change: bone structure, skeletal frame, height, natural body shape, face
+3. NEVER make the person look like a fitness model or different person
+4. Keep the EXACT same background, angle, and setting
+5. The person MUST be instantly recognizable as themselves
+
+WHAT YOU CAN CHANGE (and ONLY these):
+${enhancementInstructions}
 
 Enhancement Level: ${options.level} (${levelDescriptions[options.level]})
-
-ALLOWED CHANGES FOR THIS LEVEL:
-${enhancementInstructions}
 ${minorNote}
 
-REALISM CONSTRAINTS:
-- Fat loss: Show ~0.5-1% bodyweight/week equivalent (not extreme)
-- Muscle gain: Show 8-24 weeks of novice/intermediate progress (not bodybuilder)
-- Maintain natural proportions and frame size
+REALISM FOR BODY CHANGES:
+- Level 1: Posture/outfit only - NO body composition changes
+- Level 2: Very subtle (~5-10lbs visual difference max over 8-16 weeks)
+- Level 3: Moderate (~15-20lbs visual difference max over months)
+- NEVER show extreme transformations - keep it believable
 
-Generate a realistic preview showing what this person could look like with these achievable improvements.
+TECHNIQUE:
+- Think of this as showing the same person on their best day with better posture/outfit
+- Use the EXACT same body from the input - just minor adjustments
+- The output should pass: "Is this clearly the same person?" test
 
-Return JSON:
-{
-  "images": [
-    {
-      "imageUrl": "base64_encoded_image_data",
-      "description": "Brief description of changes applied"
-    }
-  ]
-}
-
-Return ONLY valid JSON.`;
+OUTPUT: Generate the enhanced image.`;
 }

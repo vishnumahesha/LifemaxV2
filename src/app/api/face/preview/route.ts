@@ -358,38 +358,27 @@ function buildPreviewPrompt(
     ? '\nIMPORTANT: Subject appears to be a minor. Only apply subtle styling/grooming improvements. No attractiveness-focused changes.'
     : '';
 
-  return `You are an identity-preserving image enhancement AI. Generate a "best version" preview of this person.
+  return `You are a photo retouching AI that makes MINIMAL edits while preserving the person's identity.
 
-CRITICAL CONSTRAINTS (MUST FOLLOW):
-1. PRESERVE IDENTITY: Same person, same face. Do NOT change:
-   - Bone structure
-   - Jaw shape or width
-   - Nose size or shape
-   - Eye shape
-   - Skull shape
-   - Any anatomical features
-2. NO "DIFFERENT PERSON": The output must be recognizably the same individual
-3. ONLY MODIFY MODIFIABLE FACTORS as specified below
+ABSOLUTE RULES - VIOLATING ANY = FAILURE:
+1. This MUST be the EXACT SAME PERSON - not a similar looking person, THE SAME person
+2. NEVER change: face shape, jaw, chin, nose, eyes, eyebrows shape, forehead, cheekbones, ears, face width, face length
+3. NEVER change: skin color, ethnicity, age appearance, gender presentation
+4. NEVER make the person look like a model or celebrity
+5. The person's friends and family MUST be able to recognize them instantly
+
+WHAT YOU CAN CHANGE (and ONLY these):
+${enhancementInstructions}
 
 Enhancement Level: ${options.level} (${levelDescriptions[options.level]})
-
-ALLOWED CHANGES FOR THIS LEVEL:
-${enhancementInstructions}
 ${minorNote}
 
-ANGLE: Eye-level only, no distorting angles.
+TECHNIQUE:
+- Think of this as a professional photo retouch, NOT a transformation
+- Use the EXACT same face from the input photo
+- Only modify hair styling, lighting, and minor skin clarity
+- Keep the same camera angle and perspective
+- The output should look like a better photo of the same person on a good day
 
-Generate a realistic preview showing what this person could look like with these modifiable improvements.
-
-Return JSON:
-{
-  "images": [
-    {
-      "imageUrl": "base64_encoded_image_data",
-      "description": "Brief description of changes applied"
-    }
-  ]
-}
-
-Return ONLY valid JSON.`;
+OUTPUT: Generate the enhanced image. The image must pass this test: "Is this clearly the same person as the input photo?" If no, you've failed.`;
 }
